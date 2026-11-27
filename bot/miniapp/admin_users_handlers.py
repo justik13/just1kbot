@@ -10,20 +10,30 @@ from urllib.parse import unquote
 from aiohttp import web
 from sqlalchemy import delete, func, or_, select
 
-import bot.miniapp.handlers_admin as _ha
-from bot.miniapp.admin_user_adjust_handlers import (  # noqa: F401
-    _is_pre_reactivation_held_order,
-    api_admin_user_adjust_handler,
+from bot.miniapp.admin_common import (
+    MAX_INT32,
+    MAX_INT64,
+    parse_bounded_int_query,
+    parse_json_model,
+    parse_positive_int,
+    queue_user_notification,
+    queue_wi_inline_sync,
+    queue_wi_revoke_uuids,
+    safe_admin_error_response,
 )
+from bot.miniapp.auth import require_admin_user
+from bot.miniapp.handlers_user import _build_backup_sub_url, _build_sub_url
 from bot.miniapp.schemas import (
     AdminDirectMessagePayload,
     AdminUserOptionalNotifyPayload,
 )
+from config.constants import VPN_ACCESS_GRACE_HOURS
 from config.enums import (
     AdminAuditAction,
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
+from database.connection import session_scope
 from database.models import (
     AccountLedgerEntry,
     AuditLog,
@@ -34,12 +44,23 @@ from database.models import (
     VlessSubscription,
     WhiteInternetSubscription,
 )
+from database.repositories import (
+    user_devices_repo,
+    users_repo,
+    vless_subscription_repo,
+    white_internet_repo,
+)
 from database.repositories.account_ledger_repo import (
     get_account_balance,
     get_account_balances_batch,
     get_account_history,
 )
-from config.constants import VPN_ACCESS_GRACE_HOURS
+from database.repositories.white_internet_repo import get_subscription_by_user_id
+from services import admin_tools_service
+from services.audit_service import AuditService
+from services.order_service import acquire_user_account_lock
+from services.subscription import SubscriptionService
+from services.vless_subscription_service import VlessSubscriptionService
 from utils.datetime_helpers import now_utc
 
 
@@ -65,19 +86,19 @@ def _serialize_admin_ledger_entry(entry: AccountLedgerEntry) -> dict[str, Any]:
 
 async def api_admin_users_handler(request: web.Request) -> web.Response:
     """Return user statistics and paginated user list with balances and subscriptions."""
-    ctx, err_resp = await _ha.require_admin_user(request)
+    ctx, err_resp = await require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
     q = (request.query.get("q") or "").strip()
     flt = (request.query.get("filter") or "all").strip()
-    limit = _ha._parse_bounded_int_query(request, "limit", default=10, min_value=1, max_value=50)
-    offset = _ha._parse_bounded_int_query(request, "offset", default=0, min_value=0, max_value=_ha._MAX_INT32)
+    limit = parse_bounded_int_query(request, "limit", default=10, min_value=1, max_value=50)
+    offset = parse_bounded_int_query(request, "offset", default=0, min_value=0, max_value=MAX_INT32)
 
     now = now_utc()
 
-    async with _ha.session_scope() as session:
-        filter_counts = await _ha.users_repo.get_user_filter_counts(session)
+    async with session_scope() as session:
+        filter_counts = await users_repo.get_user_filter_counts(session)
         total_users = filter_counts.get("all", 0)
         active_standard = filter_counts.get("active_standard", 0)
         active_wi = filter_counts.get("active_wi", 0)
@@ -92,7 +113,7 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
 
         stmt = select(User).where(User.is_deleted.is_(False))
         if flt == "active":
-            stmt = stmt.where(_ha.users_repo.get_effective_active_condition(now))
+            stmt = stmt.where(users_repo.get_effective_active_condition(now))
         elif flt == "active_standard":
             stmt = stmt.where(
                 User.id.in_(
@@ -100,23 +121,23 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
                 )
             )
         elif flt == "active_wi":
-            stmt = stmt.where(_ha.users_repo.get_effective_wi_active_condition(now))
+            stmt = stmt.where(users_repo.get_effective_wi_active_condition(now))
         elif flt == "expiring_3d":
-            stmt = stmt.where(_ha.users_repo.get_effective_expiring_3d_condition(now))
+            stmt = stmt.where(users_repo.get_effective_expiring_3d_condition(now))
         elif flt == "new_7d":
             stmt = stmt.where(User.created_at >= now - timedelta(days=7))
         elif flt == "expired":
-            stmt = stmt.where(_ha.users_repo.get_effective_expired_condition(now))
+            stmt = stmt.where(users_repo.get_effective_expired_condition(now))
         elif flt == "never":
-            stmt = stmt.where(_ha.users_repo.get_effective_never_condition())
+            stmt = stmt.where(users_repo.get_effective_never_condition())
         elif flt == "banned":
             stmt = stmt.where(User.is_bot_blocked.is_(True))
 
         if q:
-            if q.isdigit() and int(q) <= _ha._MAX_INT64:
+            if q.isdigit() and int(q) <= MAX_INT64:
                 q_num = int(q)
                 id_conds = [User.telegram_id == q_num]
-                if 0 < q_num <= _ha._MAX_INT32:
+                if 0 < q_num <= MAX_INT32:
                     id_conds.append(User.id == q_num)
                 stmt = stmt.where(or_(*id_conds))
             else:
@@ -232,23 +253,23 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
 
 
 async def api_admin_user_details_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = await _ha.require_admin_user(request)
+    ctx, err_resp = await require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    target_user_id, id_err = _ha._parse_positive_int(request, "user_id", label="user id")
+    target_user_id, id_err = parse_positive_int(request, "user_id", label="user id")
     if id_err is not None or target_user_id is None:
         return id_err  # type: ignore[return-value]
 
-    async with _ha.session_scope() as session:
+    async with session_scope() as session:
         user = await session.get(User, target_user_id)
         if user is None or getattr(user, "is_deleted", False):
             return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
 
         bal = await get_account_balance(session, user_id=user.id)
-        vless_sub = await _ha.vless_subscription_repo.get_subscription_by_user_id(session, user.id)
-        wi_sub = await _ha.get_subscription_by_user_id(session, user.id)
-        slot_usage = await _ha.SubscriptionService.get_device_slot_usage(
+        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        wi_sub = await get_subscription_by_user_id(session, user.id)
+        slot_usage = await SubscriptionService.get_device_slot_usage(
             session, user, vless_sub=vless_sub, wi_sub=wi_sub
         )
         devices = slot_usage["devices"]
@@ -285,7 +306,7 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                 .limit(20)
             )
         ).all()
-        recent_orders_breakdown = await _ha.admin_tools_service.build_orders_payment_breakdown(
+        recent_orders_breakdown = await admin_tools_service.build_orders_payment_breakdown(
             session, recent_orders_rows
         )
         recent_ledger_rows = await get_account_history(session, user_id=user.id, limit=25)
@@ -352,8 +373,8 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                 "monthly_wi_bytes": int(getattr(user, "monthly_wi_bytes", 0) or 0),
                 "total_wi_traffic_bytes": int(getattr(user, "total_wi_traffic_bytes", 0) or 0),
                 "churn_events_24h": churn_events_24h,
-                "subscription_url": _ha._build_sub_url(sub_token) if sub_token else None,
-                "subscription_backup_url": _ha._build_backup_sub_url(sub_token) if sub_token else None,
+                "subscription_url": _build_sub_url(sub_token) if sub_token else None,
+                "subscription_backup_url": _build_backup_sub_url(sub_token) if sub_token else None,
                 "wi": (
                     {
                         "id": wi_sub.id,
@@ -403,7 +424,7 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                         "created_at": o.created_at.isoformat() if o.created_at else None,
                         "paid_at": o.paid_at.isoformat() if o.paid_at else None,
                         "refunded_at": o.refunded_at.isoformat() if o.refunded_at else None,
-                        "metadata_flags": _ha.admin_tools_service.extract_order_metadata_flags(o.metadata_),
+                        "metadata_flags": admin_tools_service.extract_order_metadata_flags(o.metadata_),
                     }
                     for o in recent_orders_rows
                 ],
@@ -435,40 +456,62 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
         })
 
 
+async def _revoke_wi_device_uuids(
+    session,
+    wi_sub: WhiteInternetSubscription | None,
+    uuids: list[str],
+    *,
+    context: str,
+    reason: str,
+) -> None:
+    """Bump WI subscription version and queue revocation + inline sync for removed device UUIDs."""
+    if wi_sub is None or not uuids:
+        return
+    wi_sub = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id) or wi_sub
+    await white_internet_repo.add_pending_revocation_uuids(session, wi_sub.id, uuids)
+    wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
+    if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
+        wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+    await session.flush()
+    await queue_wi_revoke_uuids(session, wi_sub, uuids, context=context)
+    if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
+        await queue_wi_inline_sync(session, wi_sub, reason)
+
+
 async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = await _ha.require_admin_user(request)
+    ctx, err_resp = await require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    target_user_id, id_err = _ha._parse_positive_int(request, "user_id", label="user id")
+    target_user_id, id_err = parse_positive_int(request, "user_id", label="user id")
     if id_err is not None or target_user_id is None:
         return id_err  # type: ignore[return-value]
 
     notify_user = False
     raw_text = await request.text()
     if raw_text.strip():
-        opt_payload, parse_err = await _ha._parse_json_model(request, AdminUserOptionalNotifyPayload)
+        opt_payload, parse_err = await parse_json_model(request, AdminUserOptionalNotifyPayload)
         if parse_err is not None or opt_payload is None:
             return parse_err  # type: ignore[return-value]
         notify_user = bool(opt_payload.notify_user)
 
-    async with _ha.session_scope() as session:
-        await _ha.acquire_user_account_lock(session, target_user_id)
+    async with session_scope() as session:
+        await acquire_user_account_lock(session, target_user_id)
         user = await session.scalar(
             select(User).where(User.id == target_user_id).with_for_update()
         )
         if user is None or getattr(user, "is_deleted", False):
             return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
 
-        vless_sub = await _ha.vless_subscription_repo.get_subscription_by_user_id(session, user.id)
-        wi_sub = await _ha.get_subscription_by_user_id(session, user.id)
+        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        wi_sub = await get_subscription_by_user_id(session, user.id)
         old_vless_uuid: str | None = None
         if vless_sub is not None:
-            old_vless_uuid, _new_vless_uuid = await _ha.vless_subscription_repo.reset_hwids(
+            old_vless_uuid, _new_vless_uuid = await vless_subscription_repo.reset_hwids(
                 session, vless_sub.id
             )
             vless_sub = (
-                await _ha.vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+                await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
                 or vless_sub
             )
 
@@ -476,7 +519,7 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
         dev_uuids = [d.device_uuid for d in existing_devs if getattr(d, "device_uuid", None)]
         if vless_sub is not None and dev_uuids:
             vless_sub = (
-                await _ha.vless_subscription_repo.add_pending_revocation_uuids(
+                await vless_subscription_repo.add_pending_revocation_uuids(
                     session, vless_sub.id, dev_uuids
                 )
                 or vless_sub
@@ -496,33 +539,23 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
                 dict.fromkeys([u for u in [old_vless_uuid, *dev_uuids] if u])
             )
             for u_uuid in vless_rev_uuids:
-                _ha.VlessSubscriptionService.deprovision_background(
+                VlessSubscriptionService.deprovision_background(
                     u_uuid,
                     version=sub_ver,
                     sub_id=sub_id,
                     session=session,
                     services=("vless",),
                 )
-            _ha.VlessSubscriptionService.ensure_synced_background(user.id, session=session)
+            VlessSubscriptionService.ensure_synced_background(user.id, session=session)
 
-        if wi_sub is not None and dev_uuids:
-            wi_sub = (
-                await _ha.white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
-                or wi_sub
-            )
-            await _ha.white_internet_repo.add_pending_revocation_uuids(
-                session, wi_sub.id, dev_uuids
-            )
-            wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
-            if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
-                wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-            await session.flush()
-            await _ha._queue_wi_revoke_uuids(
-                session, wi_sub, dev_uuids, context="admin_devices_reset"
-            )
-            if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
-                await _ha._queue_wi_inline_sync(session, wi_sub, "devices_reset")
-        await _ha.AuditService.log_action(
+        await _revoke_wi_device_uuids(
+            session,
+            wi_sub,
+            dev_uuids,
+            context="admin_devices_reset",
+            reason="devices_reset",
+        )
+        await AuditService.log_action(
             session,
             admin_id=ctx.telegram_id,
             action=AdminAuditAction.VLESS_HWID_RESET,
@@ -534,7 +567,7 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
             },
         )
         if notify_user:
-            _ha._queue_user_notification(
+            queue_user_notification(
                 session,
                 request.app.get("bot"),
                 user_id=user.id,
@@ -547,11 +580,11 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
 
 async def api_admin_user_device_delete_handler(request: web.Request) -> web.Response:
     """Delete a single bound HWID device for a user and queue deprovisioning/sync."""
-    ctx, err_resp = await _ha.require_admin_user(request)
+    ctx, err_resp = await require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    target_user_id, id_err = _ha._parse_positive_int(request, "user_id", label="user id")
+    target_user_id, id_err = parse_positive_int(request, "user_id", label="user id")
     if id_err is not None or target_user_id is None:
         return id_err  # type: ignore[return-value]
 
@@ -559,57 +592,47 @@ async def api_admin_user_device_delete_handler(request: web.Request) -> web.Resp
     if not hwid or len(hwid) > 128:
         return web.json_response({"ok": False, "error": "Invalid HWID"}, status=400)
 
-    async with _ha.session_scope() as session:
-        await _ha.acquire_user_account_lock(session, target_user_id)
+    async with session_scope() as session:
+        await acquire_user_account_lock(session, target_user_id)
         user = await session.scalar(
             select(User).where(User.id == target_user_id).with_for_update()
         )
         if user is None or getattr(user, "is_deleted", False):
             return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
 
-        deleted = await _ha.user_devices_repo.delete_user_device(session, user.id, hwid)
+        deleted = await user_devices_repo.delete_user_device(session, user.id, hwid)
         if deleted is None:
             return web.json_response({"ok": False, "error": "Устройство не найдено"}, status=404)
 
         deleted_uuid = getattr(deleted, "device_uuid", None)
         if deleted_uuid:
-            vless_sub = await _ha.vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+            vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
             sub_id = vless_sub.id if vless_sub else None
             if vless_sub is not None:
-                await _ha.vless_subscription_repo.add_pending_revocation_uuids(
+                await vless_subscription_repo.add_pending_revocation_uuids(
                     session, vless_sub.id, [deleted_uuid]
                 )
             sub_ver = getattr(vless_sub, "version", None) if vless_sub else None
 
-            _ha.VlessSubscriptionService.deprovision_background(
+            VlessSubscriptionService.deprovision_background(
                 deleted_uuid,
                 version=sub_ver,
                 sub_id=sub_id,
                 session=session,
                 services=("vless",),
             )
-            _ha.VlessSubscriptionService.ensure_synced_background(user.id, session=session)
+            VlessSubscriptionService.ensure_synced_background(user.id, session=session)
 
-            wi_sub = await _ha.get_subscription_by_user_id(session, user.id)
-            if wi_sub is not None:
-                wi_sub = (
-                    await _ha.white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
-                    or wi_sub
-                )
-                await _ha.white_internet_repo.add_pending_revocation_uuids(
-                    session, wi_sub.id, [deleted_uuid]
-                )
-                wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
-                if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
-                    wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                await session.flush()
-                await _ha._queue_wi_revoke_uuids(
-                    session, wi_sub, [deleted_uuid], context="admin_device_delete"
-                )
-                if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
-                    await _ha._queue_wi_inline_sync(session, wi_sub, "device_delete")
+            wi_sub = await get_subscription_by_user_id(session, user.id)
+            await _revoke_wi_device_uuids(
+                session,
+                wi_sub,
+                [deleted_uuid],
+                context="admin_device_delete",
+                reason="device_delete",
+            )
 
-        await _ha.AuditService.log_action(
+        await AuditService.log_action(
             session,
             admin_id=ctx.telegram_id,
             action=AdminAuditAction.VLESS_HWID_RESET,
@@ -622,50 +645,50 @@ async def api_admin_user_device_delete_handler(request: web.Request) -> web.Resp
 
 
 async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = await _ha.require_admin_user(request)
+    ctx, err_resp = await require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    target_user_id, id_err = _ha._parse_positive_int(request, "user_id", label="user id")
+    target_user_id, id_err = parse_positive_int(request, "user_id", label="user id")
     if id_err is not None or target_user_id is None:
         return id_err  # type: ignore[return-value]
 
     notify_user = False
     raw_text = await request.text()
     if raw_text.strip():
-        opt_payload, parse_err = await _ha._parse_json_model(request, AdminUserOptionalNotifyPayload)
+        opt_payload, parse_err = await parse_json_model(request, AdminUserOptionalNotifyPayload)
         if parse_err is not None or opt_payload is None:
             return parse_err  # type: ignore[return-value]
         notify_user = bool(opt_payload.notify_user)
 
-    async with _ha.session_scope() as session:
-        await _ha.acquire_user_account_lock(session, target_user_id)
+    async with session_scope() as session:
+        await acquire_user_account_lock(session, target_user_id)
         user = await session.scalar(
             select(User).where(User.id == target_user_id).with_for_update()
         )
         if user is None or getattr(user, "is_deleted", False):
             return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
 
-        vless_sub = await _ha.vless_subscription_repo.get_subscription_by_user_id(session, user.id)
-        wi_sub = await _ha.get_subscription_by_user_id(session, user.id)
+        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        wi_sub = await get_subscription_by_user_id(session, user.id)
         new_token: str | None = None
         old_vless_uuid: str | None = None
         old_wi_uuid: str | None = wi_sub.uuid if wi_sub is not None else None
         if vless_sub is not None:
-            new_token, old_vless_uuid, _new_u = await _ha.vless_subscription_repo.rotate_token(
+            new_token, old_vless_uuid, _new_u = await vless_subscription_repo.rotate_token(
                 session, vless_sub.id, reset_hwids=True
             )
             vless_sub = (
-                await _ha.vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+                await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
                 or vless_sub
             )
         if wi_sub is not None:
-            wi_token = await _ha.white_internet_repo.reset_subscription_token_atomic(
+            wi_token = await white_internet_repo.reset_subscription_token_atomic(
                 session, wi_sub.id, new_token=new_token, reset_hwids=True
             )
             new_token = new_token or wi_token
             wi_sub = (
-                await _ha.white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
+                await white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
                 or wi_sub
             )
 
@@ -675,7 +698,7 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
         if vless_sub is not None:
             if dev_uuids:
                 vless_sub = (
-                    await _ha.vless_subscription_repo.add_pending_revocation_uuids(
+                    await vless_subscription_repo.add_pending_revocation_uuids(
                         session, vless_sub.id, dev_uuids
                     )
                     or vless_sub
@@ -685,7 +708,7 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
             )
             sub_ver = getattr(vless_sub, "version", None)
             for u_uuid in vless_rev_uuids:
-                _ha.VlessSubscriptionService.deprovision_background(
+                VlessSubscriptionService.deprovision_background(
                     u_uuid,
                     version=sub_ver,
                     sub_id=vless_sub.id,
@@ -698,13 +721,13 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
                 dict.fromkeys([u for u in [old_wi_uuid, *dev_uuids] if u])
             )
             if wi_rev_uuids:
-                await _ha.white_internet_repo.add_pending_revocation_uuids(
+                await white_internet_repo.add_pending_revocation_uuids(
                     session, wi_sub.id, wi_rev_uuids
                 )
                 if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
                     wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                 await session.flush()
-                await _ha._queue_wi_revoke_uuids(
+                await queue_wi_revoke_uuids(
                     session, wi_sub, wi_rev_uuids, context="admin_token_rotate"
                 )
 
@@ -712,10 +735,10 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
             delete(UserDevice).where(UserDevice.user_id == user.id)
         )
         if vless_sub is not None:
-            _ha.VlessSubscriptionService.ensure_synced_background(user.id, session=session)
+            VlessSubscriptionService.ensure_synced_background(user.id, session=session)
         if wi_sub is not None:
-            await _ha._queue_wi_inline_sync(session, wi_sub, "token_rotate")
-        await _ha.AuditService.log_action(
+            await queue_wi_inline_sync(session, wi_sub, "token_rotate")
+        await AuditService.log_action(
             session,
             admin_id=ctx.telegram_id,
             action=AdminAuditAction.VLESS_TOKEN_RESET,
@@ -723,7 +746,7 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
             target_id=user.id,
         )
         if notify_user:
-            _ha._queue_user_notification(
+            queue_user_notification(
                 session,
                 request.app.get("bot"),
                 user_id=user.id,
@@ -733,35 +756,35 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
 
     return web.json_response({
         "ok": True,
-        "subscription_url": _ha._build_sub_url(new_token) if new_token else None,
-        "subscription_backup_url": _ha._build_backup_sub_url(new_token) if new_token else None,
+        "subscription_url": _build_sub_url(new_token) if new_token else None,
+        "subscription_backup_url": _build_backup_sub_url(new_token) if new_token else None,
         "message": "Токен подписки перевыпущен, старая ссылка отключена",
     })
 
 
 async def api_admin_user_message_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = await _ha.require_admin_user(request)
+    ctx, err_resp = await require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    user_id, id_err = _ha._parse_positive_int(request, "user_id", label="user id")
+    user_id, id_err = parse_positive_int(request, "user_id", label="user id")
     if id_err is not None or user_id is None:
         return id_err  # type: ignore[return-value]
 
-    payload, parse_err = await _ha._parse_json_model(request, AdminDirectMessagePayload)
+    payload, parse_err = await parse_json_model(request, AdminDirectMessagePayload)
     if parse_err is not None or payload is None:
         return parse_err  # type: ignore[return-value]
 
     try:
-        res = await _ha.admin_tools_service.send_direct_message(
+        res = await admin_tools_service.send_direct_message(
             request.app.get("bot"),
             admin_id=ctx.telegram_id,
             user_id=user_id,
             text=payload.text,
         )
     except LookupError as exc:
-        return _ha._safe_admin_error_response(exc, status=404)
+        return safe_admin_error_response(exc, status=404)
     except ValueError as exc:
-        return _ha._safe_admin_error_response(exc)
+        return safe_admin_error_response(exc)
 
     return web.json_response({"ok": True, **res, "message": "Сообщение отправлено"})

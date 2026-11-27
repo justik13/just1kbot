@@ -1,10 +1,9 @@
-"""Unit tests for pure billing calculation, payment split, webhook validation, and 2FA tokens."""
+"""Unit tests for pure billing calculation, payment split, and webhook validation."""
 
 import uuid
 
 import pytest
 
-import services.miniapp_auth_service as miniapp_auth_service
 from bot.handlers.webhook import _validate_webhook_payload
 from bot.miniapp.handlers_user import _calc_payment_split
 from config.constants import MIN_TOPUP_RUB
@@ -96,13 +95,3 @@ def test_validate_webhook_payload_contract():
             "event": "refund.succeeded",
             "object": {"id": "ref_only"},
         })
-
-
-def test_admin_session_token_epoch_invalidation(monkeypatch):
-    monkeypatch.setattr(miniapp_auth_service, "_derive_signing_key", lambda _purpose: b"unit-test-signing-key-32-bytes!!")
-    monkeypatch.setattr(miniapp_auth_service, "is_admin", lambda uid: uid == 123456)
-    token, _exp = miniapp_auth_service.issue_admin_session_token(123456, epoch="3")
-    assert miniapp_auth_service.verify_admin_session_token(token, 123456, expected_epoch="3") is True
-    assert miniapp_auth_service.verify_admin_session_token(token, 123456, expected_epoch="4") is False
-    assert miniapp_auth_service.verify_admin_session_token(token, 999999, expected_epoch="3") is False
-    assert miniapp_auth_service.verify_admin_session_token(f"{token}tampered", 123456, expected_epoch="3") is False

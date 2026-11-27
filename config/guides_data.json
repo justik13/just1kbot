@@ -1,0 +1,502 @@
+{
+  "links": {
+    "incy_appstore": "https://apps.apple.com/app/incy/id6756943388",
+    "happ_appstore": "https://apps.apple.com/app/happ-proxy-utility/id6504287215",
+    "incy_google_play": "https://play.google.com/store/apps/details?id=llc.itdev.incy",
+    "incy_apk": "https://github.com/INCY-DEV/incy-platforms/releases/download/latest/Incy.apk",
+    "happ_apk": "https://github.com/Happ-proxy/happ-android/releases/latest/download/Happ.apk",
+    "happ_android_releases": "https://github.com/Happ-proxy/happ-android/releases",
+    "happ_win_exe": "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
+    "incy_win_exe": "https://github.com/INCY-DEV/incy-platforms/releases/download/latest/incy-windows-setup.exe",
+    "happ_mac_dmg": "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.macOS.universal.dmg",
+    "happ_linux_appimage": "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.linux.x64.AppImage",
+    "happ_desktop_releases": "https://github.com/Happ-proxy/happ-desktop/releases/latest",
+    "happ_desktop_releases_all": "https://github.com/Happ-proxy/happ-desktop/releases",
+    "incy_desktop_releases": "https://github.com/INCY-DEV/incy-platforms/releases",
+    "docs_happ_desktop": "https://docs.happ.info/main/faq",
+    "apple_account": "https://account.apple.com/account"
+  },
+  "platform_apps": {
+    "ios": [
+      {
+        "name": "INCY (App Store)",
+        "sub": "Рекомендуем · Смена региона за 2 мин",
+        "link_key": "incy_appstore"
+      },
+      {
+        "name": "Happ (App Store)",
+        "sub": "Смена региона за 2 мин",
+        "link_key": "happ_appstore"
+      }
+    ],
+    "android": [
+      {
+        "name": "INCY (Google Play)",
+        "sub": "Официальный магазин",
+        "link_key": "incy_google_play"
+      },
+      {
+        "name": "INCY (APK)",
+        "sub": "Прямая загрузка",
+        "link_key": "incy_apk"
+      },
+      {
+        "name": "Happ (APK)",
+        "sub": "Прямая загрузка",
+        "link_key": "happ_apk"
+      }
+    ],
+    "windows": [
+      {
+        "name": "Happ Desktop",
+        "sub": "Windows x64 · Рекомендуем",
+        "link_key": "happ_win_exe"
+      },
+      {
+        "name": "INCY Desktop",
+        "sub": "Windows",
+        "link_key": "incy_win_exe"
+      }
+    ],
+    "macos": [
+      {
+        "name": "Happ Desktop",
+        "sub": "macOS Universal (.dmg)",
+        "link_key": "happ_mac_dmg"
+      },
+      {
+        "name": "INCY",
+        "sub": "App Store",
+        "link_key": "incy_appstore"
+      }
+    ]
+  },
+  "kz_billing_address": {
+    "landing_title": "Адрес для выставления счёта (Казахстан)",
+    "rows": [
+      {"label": "Улица", "display": "ул. Абая, 1", "copy": "ул. Абая, 1", "aria": "Скопировать улицу"},
+      {"label": "Город", "display": "Алматы", "copy": "Алматы", "aria": "Скопировать город"},
+      {"label": "Индекс", "display": "050000", "copy": "050000", "aria": "Скопировать индекс"},
+      {"label": "Телефон", "display": "(701) 123-4567", "copy": "7011234567", "aria": "Скопировать телефон"}
+    ]
+  },
+  "video": {
+    "title": "Видеоинструкция: смена региона за 2 минуты",
+    "tag": "Рекомендуем",
+    "meta": "38 сек · 2,0 МБ · наглядный показ без банковской карты",
+    "caption": "Текстовое описание всех шагов из видео приведена ниже.",
+    "caption_landing": "Текстовая версия всех шагов из видео приведена ниже.",
+    "poster_file": "ios_02_kazakhstan.jpg",
+    "poster_placeholder": "{{IMG_IOS_2}}",
+    "video_file": "happ_guide.mp4",
+    "vtt_src": "data:text/vtt;charset=utf-8,WEBVTT%0A%0A00%3A00.000%20--%3E%2000%3A38.000%0A%D0%9F%D0%BE%D1%88%D0%B0%D0%B3%D0%BE%D0%B2%D0%B0%D1%8F%20%D1%82%D0%B5%D0%BA%D1%81%D1%82%D0%BE%D0%B2%D0%B0%D1%8F%20%D0%B8%D0%BD%D1%81%D1%82%D1%80%D1%83%D0%BA%D1%86%D0%B8%D1%8F%20%D0%BF%D1%80%D0%B8%D0%B2%D0%B5%D0%B4%D0%B5%D0%BD%D0%B0%20%D0%BF%D0%BE%D0%B4%20%D0%B2%D0%B8%D0%B4%D0%B5%D0%BE."
+  },
+  "ios": {
+    "prompt": "Выберите способ установки",
+    "methods": [
+      {
+        "id": "region",
+        "landing_btn_id": "tabBtnIosRegion",
+        "landing_sub_id": "iosSubGuideRegion",
+        "badge": "Основной",
+        "title": "Казахстан",
+        "sub": "App Store без карты",
+        "icon": "globe",
+        "has_video": true,
+        "callouts": [
+          {
+            "tone": "info",
+            "html": "<strong>Установка через App Store Казахстана:</strong> В магазине Казахстана интерфейс на русском языке, а карта для скачивания не требуется. После установки можно сразу вернуть регион РФ."
+          },
+          {
+            "tone": "warn",
+            "html": "<strong>Условия смены:</strong> На балансе Apple ID не должно быть остатка (0 ₽), действующих подписок Apple (или дождитесь их окончания), незавершённых заказов и семейного доступа."
+          }
+        ],
+        "steps": [
+          {
+            "num": 1,
+            "title": "Откройте меню смены страны в App Store",
+            "html": "Откройте <strong>App Store</strong> → иконка профиля в правом верхнем углу → первая строчка (имя и Apple ID) → <strong>«Страна/регион»</strong> → <strong>«Изменить страну или регион»</strong>.",
+            "shot": {
+              "file": "ios_01_profile.jpg",
+              "placeholder": "{{IMG_IOS_1}}",
+              "alt": "Профиль App Store",
+              "aria": "Увеличить скриншот: Профиль App Store",
+              "orientation": "vertical"
+            }
+          },
+          {
+            "num": 2,
+            "title": "Выберите Казахстан и примите условия",
+            "html": "Найдите в списке <strong>«Казахстан»</strong> и нажмите <strong>«Принять»</strong> в верхнем правом углу.",
+            "shot": {
+              "file": "ios_02_kazakhstan.jpg",
+              "placeholder": "{{IMG_IOS_2}}",
+              "alt": "Выбор Казахстана",
+              "aria": "Увеличить скриншот: Выбор Казахстана",
+              "orientation": "vertical"
+            }
+          },
+          {
+            "num": 3,
+            "title": "Способ оплаты «Нет» и адрес для счёта",
+            "html": "Если в вашем аккаунте доступен способ оплаты <strong>«Нет»</strong>, выберите его (наличие зависит от аккаунта и региона Apple ID). Пример заполнения адреса г. Алматы:",
+            "has_kz_address": true,
+            "shot": {
+              "file": "ios_03_payment.jpg",
+              "placeholder": "{{IMG_IOS_3}}",
+              "alt": "Способ оплаты Нет и адрес",
+              "aria": "Увеличить скриншот: Способ оплаты Нет и адрес",
+              "orientation": "vertical"
+            },
+            "note_landing": "Нажмите <strong>«Далее»</strong> в правом верхнем углу. Регион изменится сразу."
+          },
+          {
+            "num": 4,
+            "title": "Скачайте INCY или Happ в App Store",
+            "html": "В поиске App Store введите <strong>INCY</strong> (рекомендуется) или <strong>Happ</strong> и нажмите <strong>«Загрузить»</strong>. После установки вы можете вернуть регион РФ.",
+            "shot": {
+              "file": "ios_04_appstore.jpg",
+              "placeholder": "{{IMG_IOS_4}}",
+              "alt": "Установка клиента из App Store",
+              "aria": "Увеличить скриншот: Установка клиента из App Store",
+              "orientation": "vertical"
+            },
+            "miniapp_buttons": [
+              {"label": "App Store: INCY", "link_key": "incy_appstore"},
+              {"label": "App Store: Happ", "link_key": "happ_appstore"}
+            ]
+          }
+        ]
+      },
+      {
+        "id": "newid",
+        "landing_btn_id": "tabBtnIosNewId",
+        "landing_sub_id": "iosSubGuideNewId",
+        "badge": "Запасной",
+        "title": "Второй ID",
+        "sub": "Новый Apple ID",
+        "icon": "user",
+        "callouts": [
+          {
+            "tone": "info",
+            "html": "<strong>Второй аккаунт Apple ID:</strong> Подходит, если на основном аккаунте оформлены семейный доступ или подписки. Фото, iCloud и контакты не затрагиваются."
+          }
+        ],
+        "steps": [
+          {
+            "num": 1,
+            "title": "Создайте аккаунт на сайте Apple",
+            "html": "В браузере Safari откройте <strong>account.apple.com</strong> → «Создать Apple ID», выберите страну <strong>Казахстан</strong> или <strong>США</strong> и резервный email. В поле номера телефона укажите свой российский номер (+7): SMS с кодом подтверждения приходит без задержек.",
+            "miniapp_buttons": [
+              {"label": "Открыть account.apple.com", "link_key": "apple_account"}
+            ]
+          },
+          {
+            "num": 2,
+            "title": "Войдите только в App Store и скачайте клиент",
+            "html": "В настройках iPhone оставьте свой iCloud. В <strong>App Store</strong> нажмите аватарку → пролистайте вниз → <strong>«Выйти»</strong>, войдите под новым аккаунтом, скачайте <strong>INCY</strong> или <strong>Happ</strong>, затем верните основной Apple ID.",
+            "miniapp_buttons": [
+              {"label": "App Store: INCY", "link_key": "incy_appstore"},
+              {"label": "App Store: Happ", "link_key": "happ_appstore"}
+            ]
+          }
+        ]
+      }
+    ],
+    "common_steps": [
+      {
+        "landing_num_id": "iosCommonStep1Num",
+        "num": 5,
+        "title": "Добавьте подписку в приложение",
+        "html_landing": "После установки вернитесь на экран подключения и нажмите кнопку <strong>«Подключить в INCY»</strong> или <strong>«Подключить в Happ»</strong> (приложение откроется само и загрузит все серверы).<br>Либо нажмите <strong>«Скопировать»</strong>, откройте приложение, нажмите <strong>«+»</strong> в правом верхнем углу и выберите <strong>«Вставить из буфера»</strong>.",
+        "html_miniapp": "Вернитесь на вкладку «Доступ», нажмите <b>Подключить в INCY</b> (или <b>Happ</b>), либо вставьте скопированную ссылку в приложении через «+»."
+      },
+      {
+        "landing_num_id": "iosCommonStep2Num",
+        "num": 6,
+        "title": "Первое подключение и системное разрешение",
+        "html": "Нажмите круглую кнопку подключения в центре экрана приложения и подтвердите системный запрос iOS (<strong>«Разрешить»</strong> через Face ID или код-пароль).",
+        "note": "Кнопка станет зелёной: соединение активно. Если на iPhone в <strong>Happ</strong> подключение обрывается в фоне, откройте настройки приложения и включите оптимизацию памяти (<strong>No Limit</strong>) — в <strong>INCY</strong> этот режим включается автоматически."
+      }
+    ]
+  },
+  "android": {
+    "prompt": "Выберите способ установки",
+    "methods": [
+      {
+        "id": "play",
+        "landing_btn_id": "tabBtnAndroidPlay",
+        "landing_sub_id": "androidSubPlay",
+        "badge": "Рекомендуется",
+        "title": "Google Play",
+        "sub": "Официальный магазин",
+        "icon": "play",
+        "callouts": [
+          {
+            "tone": "warn",
+            "html": "<strong>Обратите внимание:</strong> Приложение Happ временно недоступно в Google Play РФ. Для быстрой установки из магазина используйте <strong>INCY</strong>, либо скачивайте официальный APK Happ с GitHub."
+          }
+        ],
+        "steps": [
+          {
+            "num": 1,
+            "title": "Установите INCY из Google Play",
+            "html": "Официально в Google Play доступно приложение <strong>INCY</strong>:",
+            "miniapp_buttons": [
+              {"label": "Открыть Google Play", "link_key": "incy_google_play", "primary": true}
+            ],
+            "stores": [
+              {
+                "name": "INCY в Google Play",
+                "sub": "Официально в магазине · Доступно в РФ",
+                "badge": "Установить",
+                "link_key": "incy_google_play",
+                "icon": "play"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "apk",
+        "landing_btn_id": "tabBtnAndroidApk",
+        "landing_sub_id": "androidSubApk",
+        "badge": "Без сервисов",
+        "title": "Прямой APK",
+        "sub": "Для Huawei / Honor",
+        "icon": "download",
+        "callouts": [
+          {
+            "tone": "info",
+            "html": "<strong>Для устройств без Google Play:</strong> Скачайте официальный установочный файл APK INCY или Happ напрямую с GitHub разработчика."
+          }
+        ],
+        "steps": [
+          {
+            "num": 1,
+            "title": "Скачайте установочный APK-файл",
+            "html": "Если браузер предупредит о файле, нажмите <strong>«Всё равно скачать»</strong> и затем <strong>«Установить»</strong>.",
+            "miniapp_buttons": [
+              {"label": "Incy.apk", "link_key": "incy_apk", "primary": true},
+              {"label": "Happ.apk", "link_key": "happ_apk"}
+            ],
+            "stores": [
+              {
+                "name": "Incy.apk",
+                "recommended_tag": "Рекомендуется",
+                "sub": "Официальный релиз INCY с GitHub",
+                "badge": "Скачать APK",
+                "link_key": "incy_apk",
+                "icon": "download"
+              },
+              {
+                "name": "Happ.apk",
+                "sub": "Официальный релиз Happ с GitHub",
+                "badge": "Скачать APK",
+                "link_key": "happ_apk",
+                "icon": "download"
+              }
+            ],
+            "tip": {
+              "title": "Предупреждение браузера Chrome",
+              "html": "1. При загрузке APK Chrome покажет: «Файл может быть опасным».<br>2. Нажмите <strong>«Всё равно скачать»</strong>: файл скачивается напрямую из официального репозитория разработчика на GitHub.<br>3. После загрузки откройте файл и выберите <strong>«Установить»</strong>.",
+              "link_label": "Релизы Happ Android на GitHub",
+              "link_key": "happ_android_releases"
+            },
+            "shot": {
+              "file": "android_apk_warning.jpg",
+              "placeholder": "{{IMG_ANDROID_APK}}",
+              "alt": "Предупреждение при установке APK",
+              "aria": "Открыть скриншот",
+              "orientation": "horizontal"
+            }
+          }
+        ]
+      }
+    ],
+    "common_steps": [
+      {
+        "num": 2,
+        "title": "Добавьте подписку в приложение",
+        "html_landing": "Вернитесь на экран подключения и нажмите кнопку <strong>«Подключить в INCY»</strong> или <strong>«Подключить в Happ»</strong> (приложение откроется само со списком всех серверов).<br>Либо нажмите <strong>«Скопировать»</strong>, откройте приложение, нажмите <strong>«+»</strong> и выберите <strong>«Вставить из буфера»</strong>.",
+        "html_miniapp": "Вернитесь на вкладку «Доступ» и нажмите «Подключить в INCY» или «Подключить в Happ», либо вставьте скопированную ссылку в приложении через «+»."
+      },
+      {
+        "num": 3,
+        "title": "Первое подключение и подтверждение",
+        "html": "Откройте приложение, нажмите кнопку включения и подтвердите стандартный системный <strong>«Запрос на подключение»</strong> Android (нажмите <strong>«ОК»</strong>).",
+        "note": "В строке состояния вверху экрана появится значок ключа: соединение активно."
+      }
+    ]
+  },
+  "desktop": {
+    "prompt": "Выберите операционную систему",
+    "methods": [
+      {
+        "id": "win",
+        "landing_btn_id": "tabBtnDesktopWin",
+        "landing_sub_id": "desktopSubWin",
+        "badge": "ПК",
+        "title": "Windows",
+        "sub": "Win 10 / 11",
+        "icon": "windows",
+        "steps": [
+          {
+            "num": 1,
+            "title": "Скачайте и установите программу",
+            "html_landing": "Скачайте официальный установщик Happ или INCY для Windows:",
+            "html_miniapp": "Если появится окно SmartScreen, нажмите «Подробнее» → «Выполнить в любом случае».",
+            "miniapp_buttons": [
+              {"label": "Happ (.exe)", "link_key": "happ_win_exe", "primary": true},
+              {"label": "INCY (.exe)", "link_key": "incy_win_exe"}
+            ],
+            "stores": [
+              {
+                "name": "Happ для Windows (.exe)",
+                "recommended_tag": "Рекомендуется",
+                "sub": "Официальный релиз с GitHub",
+                "badge": "Скачать setup.exe",
+                "link_key": "happ_win_exe",
+                "icon": "windows"
+              },
+              {
+                "name": "INCY для Windows (.exe)",
+                "sub": "Альтернативный клиент с GitHub",
+                "badge": "Скачать INCY",
+                "link_key": "incy_win_exe",
+                "icon": "globe"
+              }
+            ],
+            "tip": {
+              "title": "Если появилось окно защиты Windows (SmartScreen)",
+              "html": "1. Нажмите ссылку <strong>«Подробнее» (More info)</strong> в окне предупреждения.<br>2. Появится кнопка <strong>«Выполнить в любом случае» (Run anyway)</strong>: нажмите её.<br>3. Это стандартное системное уведомление Windows для программ, загруженных из интернета.",
+              "link_label": "Официальная база знаний Happ Desktop",
+              "link_key": "docs_happ_desktop"
+            }
+          },
+          {
+            "num": 2,
+            "title": "Добавьте подписку и выберите режим",
+            "html_landing": "Скопируйте ссылку на подписку на экране подключения. В программе Happ Desktop нажмите иконку <strong>«+» (Добавить)</strong> в левом верхнем углу и выберите <strong>«Вставить из буфера»</strong>. Внизу выберите режим <strong>TUN (Рекомендуется)</strong> или <strong>Системный режим</strong>.",
+            "html_miniapp": "Скопируйте ссылку на вкладке «Доступ», в программе нажмите «+» → «Вставить из буфера». Внизу выберите режим <b>TUN (Рекомендуется)</b> или Системный режим."
+          }
+        ]
+      },
+      {
+        "id": "mac",
+        "landing_btn_id": "tabBtnDesktopMac",
+        "landing_sub_id": "desktopSubMac",
+        "badge": "Mac",
+        "title": "macOS",
+        "sub": "M1–M4 / Intel",
+        "icon": "monitor",
+        "steps": [
+          {
+            "num": 1,
+            "title": "Скачайте и установите образ",
+            "html_landing": "Скачайте образ Happ для macOS (подходит для Apple Silicon M1–M4 и Intel) или установите INCY из App Store:",
+            "html_miniapp": "Подходит для процессоров Apple Silicon (M1–M4) и Intel. Перетащите иконку в папку «Программы» (Applications).",
+            "miniapp_buttons": [
+              {"label": "Скачать Happ (.dmg)", "link_key": "happ_mac_dmg", "primary": true},
+              {"label": "INCY (App Store)", "link_key": "incy_appstore"}
+            ],
+            "stores": [
+              {
+                "name": "Happ для macOS (.dmg)",
+                "recommended_tag": "Рекомендуется",
+                "sub": "Универсальная версия (Apple Silicon / Intel)",
+                "badge": "Скачать .dmg",
+                "link_key": "happ_mac_dmg",
+                "icon": "monitor"
+              },
+              {
+                "name": "INCY для macOS",
+                "sub": "App Store (Apple Silicon)",
+                "badge": "App Store",
+                "link_key": "incy_appstore",
+                "icon": "globe"
+              }
+            ],
+            "tip_desc_landing": "Откройте скачанный <code>.dmg</code> файл и перетащите иконку программы в папку <strong>«Программы»</strong> (Applications). При первом запуске разрешите системное расширение в меню <strong>«Системные настройки → Конфиденциальность и безопасность → Разрешить»</strong>."
+          },
+          {
+            "num": 2,
+            "title": "Добавьте подписку и включите доступ",
+            "html_landing": "Скопируйте ссылку подписки, добавьте её в Happ через кнопку <strong>«+»</strong>, нажмите кнопку подключения и подтвердите системный запрос macOS.",
+            "html_miniapp": "Скопируйте ссылку на вкладке «Доступ», откройте Happ, нажмите «+» и выберите «Вставить из буфера»."
+          }
+        ]
+      },
+      {
+        "id": "linux",
+        "landing_btn_id": "tabBtnDesktopLinux",
+        "landing_sub_id": "desktopSubLinux",
+        "badge": "Терминал",
+        "title": "Linux",
+        "sub": "AppImage / deb",
+        "icon": "terminal",
+        "steps": [
+          {
+            "num": 1,
+            "title": "Скачайте и запустите Happ для Linux",
+            "html_landing": "Скачайте универсальный пакет Happ Desktop или INCY для вашего дистрибутива:",
+            "html_miniapp": "Команда ниже подходит для x64 Linux; для ARM или пакетов .deb / .rpm откройте страницу релизов GitHub.",
+            "linux_cmd": "curl -fsSL https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.linux.x64.AppImage -o Happ.AppImage && chmod +x Happ.AppImage && ./Happ.AppImage",
+            "miniapp_buttons": [
+              {"label": "Релизы Happ", "link_key": "happ_desktop_releases"}
+            ],
+            "stores": [
+              {
+                "name": "Happ Desktop для Linux",
+                "sub": "AppImage, deb, rpm с GitHub",
+                "badge": "Перейти к релизам",
+                "link_key": "happ_desktop_releases",
+                "icon": "terminal"
+              },
+              {
+                "name": "INCY Platforms на GitHub",
+                "sub": "Релизы и сборки клиента",
+                "badge": "Релизы INCY",
+                "link_key": "incy_desktop_releases",
+                "icon": "globe"
+              }
+            ],
+            "tip": {
+              "title": "Запуск AppImage в терминале",
+              "html": "Сделайте файл исполняемым и запустите:<br><code>chmod +x Happ*.AppImage && ./Happ*.AppImage</code>"
+            }
+          },
+          {
+            "num": 2,
+            "title": "Добавьте подписку и подключитесь",
+            "html": "Скопируйте ссылку подписки. В программе нажмите кнопку <strong>«+» (Добавить)</strong>, выберите <strong>«Вставить из буфера»</strong>, выберите локацию и включите соединение."
+          }
+        ]
+      }
+    ]
+  },
+  "faq": [
+    {
+      "q": "Нужно ли отключать при входе в банки или Госуслуги?",
+      "a_html": "<strong>Нет, не требуется.</strong> Настроена выборочная маршрутизация: банки, Госуслуги и российские сервисы открываются напрямую на обычной скорости вашего провайдера."
+    },
+    {
+      "q": "Как вернуть регион App Store обратно на Россию?",
+      "a_html": "Сразу после загрузки клиента (INCY или Happ) откройте App Store → иконка профиля → Имя/Apple ID → «Страна или регион» → «Россия» и способ оплаты «Нет». Приложение останется на устройстве и продолжит обновляться."
+    },
+    {
+      "q": "Что делать, если пропал доступ или страницы не грузятся?",
+      "a_html": "1. Потяните список вниз на главном экране Happ или INCY, чтобы обновить серверы.<br>2. Выключите и снова включите тумблер.<br>3. Выберите другую локацию.<br>4. На iPhone в <strong>Happ</strong> при обрывах в фоне откройте настройки приложения и включите режим <strong>No Limit</strong> (в <strong>INCY</strong> он включается автоматически).<br>5. Проверьте срок действия подписки на вкладке «Доступ»."
+    },
+    {
+      "q": "Что делать, если на Android не включается соединение?",
+      "a_html": "Если ранее были установлены другие сетевые приложения, откройте <strong>Настройки телефона → Подключения → Сетевые профили</strong> и выключите <strong>«Постоянное соединение»</strong> и <strong>«Блокировать соединения»</strong> у старых программ."
+    },
+    {
+      "q": "Сколько устройств можно подключить?",
+      "a_html": "В рамках вашего тарифа доступно одновременное подключение до {device_limit} устройств. Управлять активными устройствами и освобождать слоты можно на вкладке «Доступ»."
+    }
+  ]
+}

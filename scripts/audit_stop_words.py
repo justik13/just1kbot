@@ -256,7 +256,7 @@ def run_audit() -> list[str]:
         violations.extend(_check_text_compliance(desc_name, desc_val, strict_checkout=True))
 
     # 3. Audit HTML templates & MiniApp
-    admin_allowlist_files = {"node_detail.js", "nodes.js", "user_detail.js", "security_2fa.js"}
+    admin_allowlist_files = {"node_detail.js", "nodes.js", "user_detail.js"}
     template_dirs = [REPO_ROOT / "bot" / "templates", REPO_ROOT / "frontend" / "miniapp"]
     for t_dir in template_dirs:
         if not t_dir.exists():
@@ -294,6 +294,17 @@ def run_audit() -> list[str]:
             rel_path = caddyfile_path.relative_to(REPO_ROOT).as_posix()
             violations.extend(_check_text_compliance(rel_path, content))
 
+    # 3c. Audit single-source guides JSON
+    guides_json_path = REPO_ROOT / "config" / "guides_data.json"
+    if guides_json_path.exists():
+        try:
+            content = guides_json_path.read_text(encoding="utf-8")
+        except Exception:
+            content = ""
+        if content:
+            rel_path = guides_json_path.relative_to(REPO_ROOT).as_posix()
+            violations.extend(_check_text_compliance(rel_path, content))
+
     # 4. Audit Telegram keyboards (bot/keyboards/)
     keyboards_dir = REPO_ROOT / "bot" / "keyboards"
     if keyboards_dir.exists():
@@ -319,6 +330,7 @@ def run_audit() -> list[str]:
         "bot/miniapp/admin_user_adjust_handlers.py",
         "bot/miniapp/admin_users_handlers.py",
         "services/broadcast_service.py",
+        "services/guides_content.py",
         "services/order_service.py",
         "services/admin_tools_service.py",
         "services/subscription.py",

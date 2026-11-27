@@ -11,8 +11,6 @@ import uuid
 from typing import Any
 from urllib.parse import urlsplit
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server
 from database.repositories.servers_repo import (
@@ -389,12 +387,6 @@ async def push_v2_topology_links(servers: list[Server]) -> dict[int, bool]:
 
     results = await asyncio.gather(*(_push_one(sid, url, key, pl) for sid, url, key, pl in targets))
     return dict(results)
-
-
-async def sync_v2_topology_to_nodes(session: AsyncSession) -> dict[int, bool]:
-    """Compute and push v2 links.json to all active v2 nodes via PUT /v1/node/links."""
-    servers = list(await get_all_servers(session))
-    return await push_v2_topology_links(servers)
 
 
 async def sync_v2_topology_to_nodes_nonblocking() -> dict[int, bool]:

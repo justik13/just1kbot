@@ -110,7 +110,6 @@ function _renderOverviewContent(root, state, data) {
     const problems = Array.isArray(nodes.problems) ? nodes.problems : [];
     const finances = data.finances || {};
     const users = data.users || {};
-    const webhooks = data.webhooks || {};
     const activeBroadcast = data.active_broadcast || null;
     const workers = _normalizeWorkers(data.workers);
 
@@ -140,14 +139,6 @@ function _renderOverviewContent(root, state, data) {
             <button type="button" class="alert-banner warn" data-nav="attention-orders">
                 <span style="min-width:0; flex:1;">Заказы требуют внимания: <strong>${Number(finances.attention_orders_count)}</strong></span>
                 <span class="chip chip-warn" style="white-space:nowrap; flex-shrink:0;">Проверить →</span>
-            </button>
-        `);
-    }
-    if (Number(webhooks.dead || 0) > 0) {
-        banners.push(`
-            <button type="button" class="alert-banner err" data-nav="webhooks">
-                <span style="min-width:0; flex:1;">Ошибки доставки вебхуков: <strong>${Number(webhooks.dead)}</strong></span>
-                <span class="chip chip-err" style="white-space:nowrap; flex-shrink:0;">Вебхуки →</span>
             </button>
         `);
     }
@@ -191,13 +182,7 @@ function _renderOverviewContent(root, state, data) {
                 <span class="pulse-sub">Статус: ${escapeHtml(_translateBroadcastStatus(activeBroadcast.status))}</span>
             </button>
         `
-        : `
-            <button type="button" class="pulse-card" data-nav="webhooks">
-                <span class="pulse-label">Вебхуки</span>
-                <span class="pulse-val">${Number(webhooks.pending || 0)} в очереди</span>
-                <span class="pulse-sub">Сбои доставки: ${Number(webhooks.dead || 0)}</span>
-            </button>
-        `;
+        : "";
 
     const workersHtml = workers.length
         ? workers
@@ -336,8 +321,6 @@ function _renderOverviewContent(root, state, data) {
                 state.onOpenFinances?.("", false, "orders");
             } else if (target === "attention-orders") {
                 state.onOpenFinances?.("", true, "orders");
-            } else if (target === "webhooks") {
-                state.onOpenFinances?.("", false, "webhooks");
             } else if (target === "nodes") {
                 state.onOpenNode?.(null);
             } else if (target === "users") {
@@ -430,7 +413,7 @@ export async function renderAdminOverviewView(root, state) {
         _renderOverviewContent(root, state, data);
     } catch (err) {
         if (reqId !== _overviewReqId || !root.isConnected || state.adminTab !== "overview" || state.mode !== "admin") return;
-        if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
+        if (err && err.code === "init_data_expired") return;
         showToast(err.message || "Не удалось загрузить обзор", "error");
         root.innerHTML = `
             <section class="card card-center">

@@ -218,7 +218,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
         if (reqId !== _subSettingsReqId || !body.isConnected || (state && (state.adminTab !== "subscription" || state.mode !== "admin"))) {
             return;
         }
-        if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
+        if (err && err.code === "init_data_expired") return;
         showToast(err.message || "Не удалось загрузить настройки подписки", "error");
         body.innerHTML = `
             <section class="card card-center">

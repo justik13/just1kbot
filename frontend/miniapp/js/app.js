@@ -1,4 +1,4 @@
-import { api, setOn2FARequired, setOnInitDataExpired } from "./api.js?v=2.8.0";
+import { api, setOnInitDataExpired } from "./api.js?v=2.8.0";
 import { closeAllModals, escapeHtml, setPageBackButton, showToast } from "./ui.js?v=2.8.0";
 import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.8.0";
 import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.8.0";
@@ -6,7 +6,6 @@ import { renderAdminOverviewView } from "./views/admin_overview.js?v=2.8.0";
 import { renderAdminUsersView } from "./views/admin_users.js?v=2.8.0";
 import { renderNodeDetailView } from "./views/node_detail.js?v=2.8.0";
 import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.8.0";
-import { renderSecurity2FA } from "./views/security_2fa.js?v=2.8.0";
 import { loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.8.0";
 import { renderUserDetailView } from "./views/user_detail.js?v=2.8.0";
 
@@ -71,8 +70,6 @@ function _applyDeepLink(target) {
 
 const appState = {
     user: null,
-    security: null,
-    twoFactorPassed: false,
     mode: "cabinet",
     adminTab: "overview",
     overviewData: null,
@@ -94,11 +91,7 @@ const appState = {
     finAttentionOnly: false,
     auditLogsData: null,
     auditLoadAttempted: false,
-    auditAction: "",
-    auditTargetType: "",
     auditQuery: "",
-    webhooksData: null,
-    webhooksLoadAttempted: false,
     pendingDeepLink: _parseDeepLink(),
     onOpenUser: (userId) => {
         const id = _parsePositiveInt(userId);
@@ -133,11 +126,7 @@ const appState = {
         appState.finAttentionOnly = Boolean(attentionOnly);
         appState.financesData = null;
         appState.financesLoadAttempted = false;
-        if (appState.finSubTab === "webhooks") {
-            appState.webhooksData = null;
-            appState.webhooksLoadAttempted = false;
-        } else if (appState.finSubTab === "audit") {
-            appState.auditAction = "";
+        if (appState.finSubTab === "audit") {
             appState.auditLogsData = null;
             appState.auditLoadAttempted = false;
         }
@@ -145,14 +134,12 @@ const appState = {
         appState.selectedUserId = null;
         _renderAdminView();
     },
-    onOpenAudit: (query = "", targetType = "") => {
+    onOpenAudit: (query = "") => {
         closeAllModals();
         appState.mode = "admin";
         appState.adminTab = "finances";
         appState.finSubTab = "audit";
-        appState.auditAction = "";
         appState.auditQuery = String(query || "");
-        appState.auditTargetType = String(targetType || "");
         appState.auditLogsData = null;
         appState.auditLoadAttempted = false;
         appState.selectedNodeId = null;
@@ -178,15 +165,6 @@ const appState = {
         appState.selectedNodeId = null;
         appState.selectedUserId = null;
         _renderAdminView();
-    },
-    onRequire2FA: () => {
-        clearBroadcastPollTimer();
-        closeAllModals();
-        appState.twoFactorPassed = false;
-        const root = document.getElementById("appRoot");
-        if (root && appState.mode === "admin") {
-            _openAdmin2FAGate(root);
-        }
     },
 };
 
@@ -266,10 +244,6 @@ function _syncModeSwitch() {
 async function _renderAdminView() {
     const root = document.getElementById("appRoot");
     if (!root) return;
-    if (appState.mode === "admin" && !appState.twoFactorPassed) {
-        _openAdmin2FAGate(root);
-        return;
-    }
     const seq = ++_tabSwitchSeq;
     _syncModeSwitch();
 
@@ -303,7 +277,6 @@ async function _renderAdminView() {
                 appState.nodesLoaded = true;
             } catch (err) {
                 if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
-                if (err && err.code === "2fa_required") return;
                 nodesFetchError = err;
                 showToast(err.message || "Не удалось загрузить ноды", "error");
             }
@@ -374,7 +347,7 @@ async function _renderAdminView() {
                 appState.usersData = nextUsers;
             } catch (err) {
                 if (appState.mode !== "admin") return;
-                if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
+                if (err && err.code === "init_data_expired") return;
                 showToast(err.message || "Не удалось обновить список пользователей", "error");
             }
         };
@@ -436,7 +409,7 @@ async function _renderAdminView() {
                     appState.nodesLoaded = true;
                 } catch (err) {
                     if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
-                    if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
+                    if (err && err.code === "init_data_expired") return;
                     nodesFetchError = err;
                     showToast(err.message || "Не удалось загрузить ноды", "error");
                 }
@@ -463,7 +436,7 @@ async function _renderAdminView() {
                     appState.nodes = res.nodes || [];
                     appState.nodesLoaded = true;
                 } catch (err) {
-                    if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) throw err;
+                    if (err && err.code === "init_data_expired") throw err;
                     subNodesErr = err;
                 }
             }
@@ -492,7 +465,7 @@ async function _renderAdminView() {
                     if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
                     appState.usersData = res;
                 } catch (err) {
-                    if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) throw err;
+                    if (err && err.code === "init_data_expired") throw err;
                     usersErr = err;
                 }
             }
@@ -522,7 +495,7 @@ async function _renderAdminView() {
                     appState.broadcastsOffset = res.offset ?? 0;
                     appState.broadcastsLimit = res.limit ?? 15;
                 } catch (err) {
-                    if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) throw err;
+                    if (err && err.code === "init_data_expired") throw err;
                     bcErr = err;
                 }
             }
@@ -544,32 +517,19 @@ async function _renderAdminView() {
                 if (appState.auditLogsData == null && !appState.auditLoadAttempted) {
                     try {
                         const res = await api.listAuditLogs(
-                            appState.auditAction || "",
+                            "",
                             appState.auditQuery || "",
                             0,
                             40,
-                            appState.auditTargetType || ""
+                            ""
                         );
                         if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
                         appState.auditLogsData = res;
                         appState.auditLoadAttempted = true;
                     } catch (err) {
-                        if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) throw err;
+                        if (err && err.code === "init_data_expired") throw err;
                         appState.auditLoadAttempted = true;
                         showToast(err.message || "Не удалось загрузить аудит-лог", "error");
-                    }
-                }
-            } else if (subTab === "webhooks") {
-                if (appState.webhooksData == null && !appState.webhooksLoadAttempted) {
-                    try {
-                        const res = await api.getAdminWebhooks();
-                        if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
-                        appState.webhooksData = res.webhooks || [];
-                        appState.webhooksLoadAttempted = true;
-                    } catch (err) {
-                        if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) throw err;
-                        appState.webhooksLoadAttempted = true;
-                        showToast(err.message || "Не удалось загрузить вебхуки", "error");
                     }
                 }
             } else if (appState.financesData == null && !appState.financesLoadAttempted) {
@@ -587,7 +547,7 @@ async function _renderAdminView() {
                     appState.financesData = res;
                     appState.financesLoadAttempted = true;
                 } catch (err) {
-                    if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) throw err;
+                    if (err && err.code === "init_data_expired") throw err;
                     appState.financesLoadAttempted = true;
                     showToast(err.message || "Не удалось загрузить финансы", "error");
                 }
@@ -619,7 +579,7 @@ async function _reloadNodesAndRender({ skipRender = false, removeNodeId = null }
         appState.nodes = res.nodes || [];
         appState.nodesLoaded = true;
     } catch (err) {
-        if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return false;
+        if (err && err.code === "init_data_expired") return false;
         if (seq !== _tabSwitchSeq || appState.mode !== "admin") return false;
         showToast(err.message || "Не удалось загрузить ноды", "error");
         return false;
@@ -634,50 +594,6 @@ async function _reloadNodesAndRender({ skipRender = false, removeNodeId = null }
     }
     return true;
 }
-
-function _openAdmin2FAGate(root) {
-    clearBroadcastPollTimer();
-    ++_tabSwitchSeq;
-    _syncModeSwitch();
-    _updateTelegramBackButton(() => {
-        closeAllModals();
-        appState.pendingDeepLink = null;
-        appState.mode = "cabinet";
-        _renderAdminView();
-    });
-    renderSecurity2FA(root, appState.security, async (res) => {
-        const isConfigured = Boolean(
-            !res || res.totp_configured || res.configured || res.two_factor_configured || res.verified
-        );
-        appState.security = {
-            ...(appState.security || {}),
-            totp_enabled: true,
-            totp_verified: true,
-            totp_configured: isConfigured,
-            configured: isConfigured,
-            two_factor_configured: isConfigured,
-            two_factor_verified: true,
-            two_factor_mode: "totp",
-        };
-        appState.twoFactorPassed = true;
-        appState.mode = "admin";
-        if (appState.pendingDeepLink) {
-            _applyDeepLink(appState.pendingDeepLink);
-            appState.pendingDeepLink = null;
-        }
-        await _renderAdminView();
-    });
-}
-
-setOn2FARequired(() => {
-    clearBroadcastPollTimer();
-    closeAllModals();
-    appState.twoFactorPassed = false;
-    const root = document.getElementById("appRoot");
-    if (root && appState.mode === "admin") {
-        _openAdmin2FAGate(root);
-    }
-});
 
 setOnInitDataExpired(() => {
     clearBroadcastPollTimer();
@@ -710,16 +626,7 @@ async function bootstrap() {
                 const nextMode = btn.dataset.mode;
                 if (nextMode === appState.mode) return;
                 closeAllModals();
-                if (nextMode === "cabinet" && !appState.twoFactorPassed) {
-                    appState.pendingDeepLink = null;
-                }
                 appState.mode = nextMode;
-                if (nextMode === "admin") {
-                    if (!appState.twoFactorPassed) {
-                        _openAdmin2FAGate(root);
-                        return;
-                    }
-                }
                 _renderAdminView();
             });
         });
@@ -728,7 +635,6 @@ async function bootstrap() {
     try {
         const me = await api.getMe();
         appState.user = me.user;
-        appState.security = me.security;
         userChip.textContent = me.user.name || "";
 
         if (!me.user.is_admin) {
@@ -738,14 +644,8 @@ async function bootstrap() {
             return;
         }
 
-        appState.twoFactorPassed = Boolean(me.security && me.security.two_factor_verified);
-
         if (appState.pendingDeepLink && appState.pendingDeepLink.mode === "admin") {
             appState.mode = "admin";
-            if (!appState.twoFactorPassed) {
-                await _openAdmin2FAGate(root);
-                return;
-            }
             _applyDeepLink(appState.pendingDeepLink);
             appState.pendingDeepLink = null;
             await _renderAdminView();

@@ -1,11 +1,4 @@
-const ADMIN_SESSION_KEY = "just1k_admin_session";
-
-let _on2FARequired = null;
 let _onInitDataExpired = null;
-
-export function setOn2FARequired(cb) {
-    _on2FARequired = typeof cb === "function" ? cb : null;
-}
 
 export function setOnInitDataExpired(cb) {
     _onInitDataExpired = typeof cb === "function" ? cb : null;
@@ -16,48 +9,11 @@ function getInitData() {
     return tg && tg.initData ? tg.initData : "";
 }
 
-function getAdminSessionToken() {
-    try {
-        const val = localStorage.getItem(ADMIN_SESSION_KEY);
-        if (val) return val;
-    } catch {
-        // Fallback to sessionStorage
-    }
-    try {
-        return sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
-    } catch {
-        return "";
-    }
-}
-
-export function setAdminSessionToken(token) {
-    try {
-        if (token) {
-            localStorage.setItem(ADMIN_SESSION_KEY, token);
-        } else {
-            localStorage.removeItem(ADMIN_SESSION_KEY);
-        }
-    } catch {
-        // Fallback to sessionStorage
-    }
-    try {
-        if (token) {
-            sessionStorage.setItem(ADMIN_SESSION_KEY, token);
-        } else {
-            sessionStorage.removeItem(ADMIN_SESSION_KEY);
-        }
-    } catch {
-        // Ignore storage errors
-    }
-}
-
 async function requestJson(path, options = {}) {
     const { timeoutMs = 15000, ...fetchOptions } = options;
-    const adminToken = getAdminSessionToken();
     const headers = {
         "Content-Type": "application/json",
         "X-Telegram-Init-Data": getInitData(),
-        ...(adminToken ? { "X-Admin-Session": adminToken } : {}),
         ...(fetchOptions.headers || {}),
     };
     const controller = new AbortController();
@@ -98,10 +54,7 @@ async function requestJson(path, options = {}) {
         err.code = data.code || "";
         err.data = data;
         err.payload = data;
-        if (resp.status === 403 && data.code === "2fa_required") {
-            setAdminSessionToken("");
-            if (_on2FARequired) _on2FARequired(err);
-        } else if (resp.status === 401 && data.code === "init_data_expired") {
+        if (resp.status === 401 && data.code === "init_data_expired") {
             if (_onInitDataExpired) _onInitDataExpired(err);
         }
         throw err;
@@ -112,29 +65,8 @@ async function requestJson(path, options = {}) {
 export const api = {
     getMe: () => requestJson("/api/app/me"),
 
-    // Admin 2FA
-    setup2FA: () => requestJson("/api/app/admin/2fa/setup", { method: "POST" }),
-    verify2FA: (code, setupToken = null) =>
-        requestJson("/api/app/admin/2fa/verify", {
-            method: "POST",
-            body: JSON.stringify(setupToken ? { code, setup_token: setupToken } : { code }),
-        }),
-    adminLogout: () =>
-        requestJson("/api/app/admin/2fa/logout", {
-            method: "POST",
-        }),
-
     // Admin overview, nodes & users
     getAdminOverview: () => requestJson("/api/app/admin/overview"),
-    getAdminWebhooks: () => requestJson("/api/app/admin/webhooks"),
-    retryWebhook: (webhookId) =>
-        requestJson(`/api/app/admin/webhooks/${encodeURIComponent(webhookId)}/retry`, {
-            method: "POST",
-        }),
-    dismissWebhook: (webhookId) =>
-        requestJson(`/api/app/admin/webhooks/${encodeURIComponent(webhookId)}/dismiss`, {
-            method: "POST",
-        }),
     getIncySettings: () => requestJson("/api/app/admin/incy-settings"),
     updateIncySettings: (payload) =>
         requestJson("/api/app/admin/incy-settings", {
@@ -146,11 +78,6 @@ export const api = {
         requestJson("/api/app/admin/nodes/add", {
             method: "POST",
             body: JSON.stringify(payload),
-            timeoutMs: 25000,
-        }),
-    refreshNode: (id) =>
-        requestJson(`/api/app/admin/nodes/${id}/refresh`, {
-            method: "POST",
             timeoutMs: 25000,
         }),
     patchNode: (id, payload) =>

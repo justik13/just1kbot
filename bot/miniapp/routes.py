@@ -9,44 +9,42 @@ import re
 
 from aiohttp import web
 
-from bot.miniapp.auth import check_miniapp_asset_rate_limit, check_miniapp_rate_limit
-from bot.miniapp.handlers_admin import (
-    api_admin_2fa_logout_handler,
-    api_admin_2fa_setup_handler,
-    api_admin_2fa_verify_handler,
+from bot.miniapp.admin_nodes_handlers import (
+    api_admin_incy_get_handler,
+    api_admin_incy_put_handler,
+    api_admin_nodes_add_handler,
+    api_admin_nodes_delete_handler,
+    api_admin_nodes_lifecycle_handler,
+    api_admin_nodes_list_handler,
+    api_admin_nodes_patch_handler,
+    api_admin_nodes_toggle_handler,
+)
+from bot.miniapp.admin_ops_handlers import (
     api_admin_audit_logs_handler,
     api_admin_broadcast_cancel_handler,
     api_admin_broadcast_preview_handler,
     api_admin_broadcast_start_handler,
     api_admin_broadcasts_list_handler,
     api_admin_finances_handler,
-    api_admin_incy_get_handler,
-    api_admin_incy_put_handler,
     api_admin_mass_bonus_handler,
     api_admin_mass_extend_handler,
-    api_admin_nodes_add_handler,
-    api_admin_nodes_delete_handler,
-    api_admin_nodes_lifecycle_handler,
-    api_admin_nodes_list_handler,
-    api_admin_nodes_patch_handler,
-    api_admin_nodes_refresh_handler,
-    api_admin_nodes_toggle_handler,
     api_admin_order_ack_review_handler,
     api_admin_overview_handler,
     api_admin_payments_maintenance_get_handler,
     api_admin_payments_maintenance_post_handler,
-    api_admin_user_adjust_handler,
+)
+from bot.miniapp.admin_user_adjust_handlers import api_admin_user_adjust_handler
+from bot.miniapp.admin_users_handlers import (
     api_admin_user_details_handler,
     api_admin_user_device_delete_handler,
     api_admin_user_devices_reset_handler,
     api_admin_user_message_handler,
     api_admin_user_token_rotate_handler,
     api_admin_users_handler,
-    api_admin_webhook_dismiss_handler,
-    api_admin_webhook_retry_handler,
-    api_admin_webhooks_handler,
-    api_me_handler,
 )
+from bot.miniapp.auth import check_miniapp_asset_rate_limit, check_miniapp_rate_limit
+from bot.miniapp.handlers_admin import api_me_handler
+from services.guides_content import GUIDES_DATA_PATH
 from bot.miniapp.handlers_user import (
     api_user_auto_renew_handler,
     api_user_dashboard_handler,
@@ -105,6 +103,10 @@ def _compute_miniapp_asset_version() -> str:
             digest.update(b"\0")
             digest.update(path.read_bytes())
             digest.update(b"\0")
+    if GUIDES_DATA_PATH.is_file():
+        digest.update(b"guides_data.json\0")
+        digest.update(GUIDES_DATA_PATH.read_bytes())
+        digest.update(b"\0")
     return digest.hexdigest()[:10]
 
 
@@ -155,7 +157,11 @@ async def miniapp_asset_handler(request: web.Request) -> web.Response:
     if not rel_path or ".." in rel_path.split("/"):
         return web.Response(status=404, text="Not Found")
 
-    if rel_path.startswith("guides/"):
+    if rel_path == "guides_data.json":
+        target = GUIDES_DATA_PATH
+        if not target.is_file():
+            return web.Response(status=404, text="Not Found")
+    elif rel_path.startswith("guides/"):
         guide_rel = rel_path[len("guides/"):]
         if not guide_rel or "/" in guide_rel:
             return web.Response(status=404, text="Not Found")
@@ -203,23 +209,14 @@ def setup_miniapp_routes(app: web.Application) -> None:
 
     app.router.add_get("/api/app/me", api_me_handler)
 
-    # Admin 2FA & session
-    app.router.add_post("/api/app/admin/2fa/setup", api_admin_2fa_setup_handler)
-    app.router.add_post("/api/app/admin/2fa/verify", api_admin_2fa_verify_handler)
-    app.router.add_post("/api/app/admin/2fa/logout", api_admin_2fa_logout_handler)
-
-    # Admin overview & webhooks
+    # Admin overview
     app.router.add_get("/api/app/admin/overview", api_admin_overview_handler)
-    app.router.add_get("/api/app/admin/webhooks", api_admin_webhooks_handler)
-    app.router.add_post("/api/app/admin/webhooks/{webhook_id}/retry", api_admin_webhook_retry_handler)
-    app.router.add_post("/api/app/admin/webhooks/{webhook_id}/dismiss", api_admin_webhook_dismiss_handler)
 
     # Admin nodes & users
     app.router.add_get("/api/app/admin/nodes", api_admin_nodes_list_handler)
     app.router.add_get("/api/app/admin/incy-settings", api_admin_incy_get_handler)
     app.router.add_put("/api/app/admin/incy-settings", api_admin_incy_put_handler)
     app.router.add_post("/api/app/admin/nodes/add", api_admin_nodes_add_handler)
-    app.router.add_post("/api/app/admin/nodes/{server_id}/refresh", api_admin_nodes_refresh_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/lifecycle", api_admin_nodes_lifecycle_handler)
     app.router.add_patch("/api/app/admin/nodes/{server_id}", api_admin_nodes_patch_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/toggle", api_admin_nodes_toggle_handler)

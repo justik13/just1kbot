@@ -25,10 +25,9 @@ from bot.middlewares import (
 )
 from config.constants import WHITE_INTERNET_SUB_PATH_PREFIX
 from config.settings import get_settings
-from database.connection import close_db, init_db, session_scope
+from database.connection import close_db, init_db
 from services.admin_tools_service import stop_admin_bulk_tasks
 from services.broadcast_service import resume_pending_broadcasts, stop_broadcast_tasks
-from services.miniapp_auth_service import get_admin_session_epoch
 from services.workers import (
     shutdown_event,
     start_background_workers,
@@ -381,9 +380,6 @@ async def main():
         except Exception as proxy_sync_exc:
             logger.warning("Initial dynamic trusted proxies refresh skipped: %s", proxy_sync_exc)
 
-        async with session_scope() as session:
-            await get_admin_session_epoch(session)
-
         bot, dp = await setup_bot()
 
         webhook_runner = await start_webhook_server(
@@ -501,7 +497,7 @@ async def main():
                 logger.error("Failed to clean up webhook server: %s", e)
 
         try:
-            from bot.miniapp.handlers_admin import cancel_admin_background_tasks
+            from bot.miniapp.admin_common import cancel_admin_background_tasks
 
             await cancel_admin_background_tasks()
         except Exception as e:

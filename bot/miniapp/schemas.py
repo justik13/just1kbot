@@ -11,11 +11,6 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 _TG_FILE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,256}$")
 
 
-class Verify2FAPayload(BaseModel):
-    code: str = Field(..., min_length=1, max_length=32)
-    setup_token: str | None = Field(default=None, max_length=512)
-
-
 class TopupPayload(BaseModel):
     amount_rub: int = Field(..., ge=20, le=50000)
     idempotency_key: str | None = Field(default=None, max_length=64)
@@ -80,20 +75,6 @@ class IncyGlobalSettingsPayload(BaseModel):
     profile_update_interval: int | None = Field(default=None, ge=1, le=720)
     support_url: str | None = Field(default=None, max_length=500)
     web_page_url: str | None = Field(default=None, max_length=500)
-    sort_order: Literal["none", "ping", "name"] | None = None
-    hide_url: bool | None = None
-    hide_check: bool | None = None
-    fragmentation_enabled: bool | None = None
-    fragmentation_packets: str | None = Field(default=None, max_length=64)
-    fragmentation_length: str | None = Field(default=None, max_length=32)
-    fragmentation_interval: str | None = Field(default=None, max_length=32)
-    no_limit_mode: Literal["off", "all", "xhttp"] | None = None
-    dns_resolve_enabled: bool | None = None
-    dns_resolve_domain: str | None = Field(default=None, max_length=253)
-    dns_resolve_ip: str | None = Field(default=None, max_length=64)
-    per_app_proxy_enabled: bool | None = None
-    per_app_proxy_mode: Literal["bypass", "proxy"] | None = None
-    per_app_proxy_list: str | None = Field(default=None, max_length=2000)
     cdn_label_mode: Literal["badge", "name", "none"] | None = None
     cdn_yandex_label: str | None = Field(default=None, max_length=32)
     cdn_turboflare_label: str | None = Field(default=None, max_length=32)
@@ -170,7 +151,6 @@ class AdminUserAdjustPayload(BaseModel):
     gb: int | None = Field(default=None, ge=1, le=5000)
     financial_hold: bool | None = None
     topup_blocked: bool | None = None
-    reactivate_wi: bool = False
     notify_user: bool | None = None
     send_note_to_user: bool = False
     note: str | None = Field(default=None, max_length=120)

@@ -280,18 +280,17 @@ sync_trusted_proxies_env() {
     fi
     [[ -n "$py_bin" ]] || return 0
 
-    local cur_caddy cur_bot resolved_pair new_caddy new_bot
+    local cur_caddy resolved_caddy
     cur_caddy="$(get_env_var "CADDY_TRUSTED_PROXIES" "")"
-    cur_bot="$(get_env_var "TRUSTED_PROXIES" "")"
 
-    resolved_pair="$("$py_bin" - "$api_urls" "$inactive_urls" "$cur_caddy" "$cur_bot" <<'PYEOF'
+    resolved_caddy="$("$py_bin" - "$api_urls" "$inactive_urls" "$cur_caddy" <<'PYEOF'
 import ipaddress
 import socket
 import sys
 from urllib.parse import urlsplit
 
 socket.setdefaulttimeout(3.0)
-urls_raw, inactive_raw, cur_caddy, cur_bot = sys.argv[1:5]
+urls_raw, inactive_raw, cur_caddy = sys.argv[1:4]
 url_lines = [line.strip() for line in urls_raw.splitlines() if line.strip()]
 inactive_lines = [line.strip() for line in inactive_raw.splitlines() if line.strip()]
 
@@ -330,7 +329,7 @@ hub_ips = resolve_urls(url_lines)
 inactive_ips = set(resolve_urls(inactive_lines)) - set(hub_ips)
 
 if url_lines and not hub_ips:
-    print("\t")
+    print("")
     sys.exit(0)
 
 def _is_valid_proxy_token(val):
@@ -358,19 +357,12 @@ def merge_tokens(existing_raw, base_tokens, sep):
             tokens.append(val)
     return sep.join(tokens)
 
-new_caddy = merge_tokens(cur_caddy, ["private_ranges"], " ")
-new_bot = merge_tokens(cur_bot, ["127.0.0.1", "::1", "172.16.0.0/12"], ",")
-print(f"{new_caddy}\t{new_bot}")
+print(merge_tokens(cur_caddy, ["private_ranges"], " "))
 PYEOF
 )" || return 0
 
-    IFS=$'\t' read -r new_caddy new_bot <<< "$resolved_pair"
-    if [[ -n "$new_caddy" && "$new_caddy" != "$cur_caddy" ]]; then
-        set_env_var "CADDY_TRUSTED_PROXIES" "'${new_caddy}'"
-        TRUSTED_PROXIES_ENV_CHANGED=1
-    fi
-    if [[ -n "$new_bot" && "$new_bot" != "$cur_bot" ]]; then
-        set_env_var "TRUSTED_PROXIES" "'${new_bot}'"
+    if [[ -n "$resolved_caddy" && "$resolved_caddy" != "$cur_caddy" ]]; then
+        set_env_var "CADDY_TRUSTED_PROXIES" "'${resolved_caddy}'"
         TRUSTED_PROXIES_ENV_CHANGED=1
     fi
     return 0
@@ -924,9 +916,9 @@ cmd_update() {
             apply_sysctl_hardening
             ensure_subscription_domains_caddy
             if [[ "${TRUSTED_PROXIES_ENV_CHANGED:-0}" == "1" ]]; then
-                info "Обновлён список TRUSTED_PROXIES / CADDY_TRUSTED_PROXIES — применяю переменные окружения в контейнерах..."
-                if ! dc_up caddy bot; then
-                    error "Не удалось пересоздать caddy/bot для применения TRUSTED_PROXIES!"
+                info "Обновлён список CADDY_TRUSTED_PROXIES — применяю переменные окружения в caddy..."
+                if ! dc_up caddy; then
+                    error "Не удалось пересоздать caddy для применения CADDY_TRUSTED_PROXIES!"
                     return 1
                 fi
             elif docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null | grep -q "^running$"; then
@@ -1164,9 +1156,9 @@ cmd_update() {
         apply_sysctl_hardening
         ensure_subscription_domains_caddy
         if [[ "${TRUSTED_PROXIES_ENV_CHANGED:-0}" == "1" ]]; then
-            info "Обновлён список TRUSTED_PROXIES / CADDY_TRUSTED_PROXIES — пересоздаю caddy и bot..."
-            if ! dc_up caddy bot; then
-                error "Не удалось пересоздать caddy/bot после обновления TRUSTED_PROXIES!"
+            info "Обновлён список CADDY_TRUSTED_PROXIES — пересоздаю caddy..."
+            if ! dc_up caddy; then
+                error "Не удалось пересоздать caddy после обновления CADDY_TRUSTED_PROXIES!"
                 return 1
             fi
         elif docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null | grep -q "^running$"; then
@@ -1857,25 +1849,25 @@ cmd_restart() {
     local service="${1:-bot}"
     echo -e "\n${BOLD}${BLUE}=== ⚡ ПЕРЕЗАПУСК СЕРВИСА: ${service} ===${NC}\n"
     ensure_subscription_domains_caddy
-    local _recreated_proxies=0
+    local _recreated_caddy=0
     if [[ "${TRUSTED_PROXIES_ENV_CHANGED:-0}" == "1" ]]; then
-        info "Обновлён список TRUSTED_PROXIES / CADDY_TRUSTED_PROXIES — пересоздаю caddy и bot..."
-        if ! dc_up caddy bot; then
-            error "Не удалось пересоздать caddy/bot!"
+        info "Обновлён список CADDY_TRUSTED_PROXIES — пересоздаю caddy..."
+        if ! dc_up caddy; then
+            error "Не удалось пересоздать caddy!"
             return 1
         fi
-        _recreated_proxies=1
+        _recreated_caddy=1
     fi
-    if [[ $_recreated_proxies -eq 1 && ( "$service" == "bot" || "$service" == "caddy" ) ]]; then
+    if [[ $_recreated_caddy -eq 1 && "$service" == "caddy" ]]; then
         log "Сервис $service пересоздан с актуальным .env."
         return 0
     fi
     if [[ "$service" == "all" ]]; then
-        if [[ $_recreated_proxies -eq 1 ]]; then
+        if [[ $_recreated_caddy -eq 1 ]]; then
             local -a other_services=()
             local svc
             while IFS= read -r svc; do
-                [[ -n "$svc" && "$svc" != "bot" && "$svc" != "caddy" ]] && other_services+=("$svc")
+                [[ -n "$svc" && "$svc" != "caddy" ]] && other_services+=("$svc")
             done < <(docker compose ps --services 2>/dev/null || true)
             if [[ ${#other_services[@]} -gt 0 ]]; then
                 docker compose restart "${other_services[@]}"

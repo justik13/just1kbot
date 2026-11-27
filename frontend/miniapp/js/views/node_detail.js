@@ -458,7 +458,6 @@ export function renderNodeDetailView(root, node, onBack, onReload, allNodes = []
                 <button type="button" id="detailToggleBtn" class="btn btn-sm ${node.is_active ? "" : "btn-primary"}">
                     ${node.is_active ? "Выключить" : "Включить"}
                 </button>
-                <button type="button" id="detailRefreshBtn" class="btn btn-sm">Опросить ноду</button>
                 ${node.role === "ru_hub" ? `<button type="button" id="detailLifecycleBtn" class="btn btn-sm" title="${isDecommissioning ? "Вернуть ноду в активное обслуживание" : "Перевести ноду в режим вывода из эксплуатации"}">
                     ${isDecommissioning ? "Вернуть в работу" : "Вывести из работы"}
                 </button>` : ""}
@@ -568,19 +567,6 @@ export function renderNodeDetailView(root, node, onBack, onReload, allNodes = []
                     await onReload();
                 });
             },
-        });
-    });
-
-    root.querySelector("#detailRefreshBtn").addEventListener("click", async (e) => {
-        const b = e.currentTarget;
-        await withButtonLoading(b, "Опрос...", async () => {
-            try {
-                await api.refreshNode(node.id);
-                showToast(`Нода #${node.id} обновлена`);
-                await onReload();
-            } catch (err) {
-                showToast(err.message || "Ошибка опроса", "error");
-            }
         });
     });
 

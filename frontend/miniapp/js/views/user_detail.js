@@ -158,7 +158,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         if (reqId !== _detailReqId) return;
         if (state && state.selectedUserId !== userSummary.id) return;
         if (!root.isConnected || (sentinelBtn && !root.contains(sentinelBtn))) return;
-        if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
+        if (err && err.code === "init_data_expired") return;
         if (preserveScroll && hadExistingProfile) {
             showToast(err.message || "Не удалось обновить профиль", "error");
             return;
@@ -496,17 +496,6 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                         <span class="switch-track"></span>
                     </span>
                 </label>
-                ${
-                    wi && ["disabled", "revoked", "suspended"].includes(wiStatusKey)
-                        ? `<label for="restrReactivateWiInput" class="toggle-row">
-                               <span class="toggle-label">Восстановить доступ Белого интернета</span>
-                               <span class="switch">
-                                   <input id="restrReactivateWiInput" name="reactivate_wi" type="checkbox">
-                                   <span class="switch-track"></span>
-                               </span>
-                           </label>`
-                        : ""
-                }
                 <label for="restrNoteInput" class="visually-hidden">Причина или комментарий к ограничениям</label>
                 <input id="restrNoteInput" name="note" class="input" type="text" maxlength="120" placeholder="Причина / комментарий (необязательно)">
                 <button type="submit" class="btn btn-sm">Сохранить ограничения</button>

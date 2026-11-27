@@ -1,4 +1,4 @@
-"""HTTP authentication, admin authorization, 2FA session, and rate-limit guards for Mini App."""
+"""HTTP authentication, admin authorization, and rate-limit guards for Mini App."""
 
 from __future__ import annotations
 
@@ -8,8 +8,6 @@ from services.miniapp_auth_service import (
     InitDataExpiredError,
     MiniAppUserContext,
     authenticate_miniapp_request,
-    resolve_admin_session_epoch,
-    verify_admin_session_token,
 )
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 
@@ -48,10 +46,6 @@ def _extract_init_data(request: web.Request) -> str | None:
     return init_data
 
 
-def extract_miniapp_user(request: web.Request) -> MiniAppUserContext | None:
-    return authenticate_miniapp_request(_extract_init_data(request))
-
-
 def require_authenticated_user(
     request: web.Request,
 ) -> tuple[MiniAppUserContext | None, web.Response | None]:
@@ -83,8 +77,6 @@ def require_authenticated_user(
 
 async def require_admin_user(
     request: web.Request,
-    *,
-    require_2fa: bool = True,
 ) -> tuple[MiniAppUserContext | None, web.Response | None]:
     ctx, err_resp = require_authenticated_user(request)
     if err_resp is not None or ctx is None:
@@ -95,18 +87,5 @@ async def require_admin_user(
             {"ok": False, "error": "Access denied"},
             status=403,
         )
-
-    if require_2fa:
-        session_token = request.headers.get("X-Admin-Session")
-        expected_epoch = await resolve_admin_session_epoch()
-        if not verify_admin_session_token(
-            session_token,
-            ctx.telegram_id,
-            expected_epoch=expected_epoch,
-        ):
-            return None, web.json_response(
-                {"ok": False, "error": "Требуется подтверждение 2FA", "code": "2fa_required"},
-                status=403,
-            )
 
     return ctx, None

@@ -381,22 +381,20 @@ export function bindUserDetailActions({
         e.preventDefault();
         const financialHold = Boolean(restrForm.querySelector("input[name='financial_hold']")?.checked);
         const topupBlocked = Boolean(restrForm.querySelector("input[name='topup_blocked']")?.checked);
-        const reactivateWi = Boolean(restrForm.querySelector("input[name='reactivate_wi']")?.checked);
         const note = restrForm.querySelector("input[name='note']")?.value.trim() || null;
         const holdChanged = financialHold !== origFinancialHold;
         const topupChanged = topupBlocked !== origTopupBlocked;
-        if (!holdChanged && !topupChanged && !reactivateWi) {
+        if (!holdChanged && !topupChanged) {
             showToast("Ограничения не изменились", "warn");
             return;
         }
         const payload = { action: "restrictions", note };
         if (holdChanged) payload.financial_hold = financialHold;
         if (topupChanged) payload.topup_blocked = topupBlocked;
-        if (reactivateWi) payload.reactivate_wi = true;
         const enablingRestriction = (holdChanged && financialHold) || (topupChanged && topupBlocked);
         showConfirmModal({
             title: "Сохранить ограничения?",
-            message: `Применить настройки ограничений для ${uname}?${holdChanged && financialHold ? " Финансовая блокировка ограничит доступ." : ""}${reactivateWi ? " Подписка «Белый интернет» будет восстановлена." : ""}`,
+            message: `Применить настройки ограничений для ${uname}?${holdChanged && financialHold ? " Финансовая блокировка ограничит доступ." : ""}`,
             confirmText: "Сохранить",
             cancelText: "Отмена",
             isDestructive: enablingRestriction,
@@ -425,7 +423,7 @@ export function bindUserDetailActions({
         }
         const auditBtn = e.target.closest("#detOpenAuditBtn");
         if (auditBtn && historyListEl.contains(auditBtn)) {
-            state?.onOpenAudit?.(String(details.id), "user");
+            state?.onOpenAudit?.(String(details.id));
         }
     });
 

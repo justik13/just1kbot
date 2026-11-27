@@ -483,6 +483,78 @@ class SubscriptionService:
         return user
 
     @staticmethod
+    async def reduce_standard_subscription(
+        session: AsyncSession,
+        user: User,
+        *,
+        days: int,
+        new_device_limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Reduce active Standard subscription period (and optionally device limit) with sync."""
+        if days >= 0:
+            raise ValueError("days must be < 0 for reduce_standard_subscription")
+
+        from database.repositories import vless_subscription_repo
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        now = now_utc()
+        if vless_sub is None or not vless_sub.expires_at or vless_sub.expires_at <= now:
+            raise ValueError("Подписка «Стандарт» неактивна или уже истекла")
+
+        before_end = vless_sub.expires_at.isoformat() if vless_sub.expires_at else None
+        before_limit = int(getattr(vless_sub, "device_limit", 0) or 0)
+        new_end = vless_sub.expires_at - timedelta(days=abs(days))
+
+        if (
+            new_end > now
+            and new_device_limit is not None
+            and new_device_limit < before_limit
+        ):
+            slot_usage = await SubscriptionService.get_device_slot_usage(
+                session, user, vless_sub=vless_sub, now=now
+            )
+            fits, limit_reason = SubscriptionService.check_standard_limit_fits(
+                slot_usage, new_device_limit
+            )
+            if not fits:
+                raise ValueError(limit_reason or "Активных устройств больше нового лимита")
+
+        expired_now = new_end <= now
+        vless_sub.expires_at = (
+            now - timedelta(hours=VPN_ACCESS_GRACE_HOURS + 1)
+            if expired_now
+            else new_end
+        )
+        limit_changed = (
+            new_device_limit is not None
+            and new_device_limit != before_limit
+        )
+        if new_device_limit is not None:
+            vless_sub.device_limit = new_device_limit
+
+        if expired_now:
+            vless_sub.is_active = False
+            vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
+            await session.flush()
+            VlessSubscriptionService.ensure_synced_background(
+                user.id, is_active=False, session=session
+            )
+        elif limit_changed:
+            vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
+            await session.flush()
+            VlessSubscriptionService.ensure_synced_background(user.id, session=session)
+        else:
+            await session.flush()
+
+        return {
+            "vless_sub": vless_sub,
+            "before_end": before_end,
+            "before_limit": before_limit,
+            "expired_now": expired_now,
+        }
+
+    @staticmethod
     async def _sync_access_state(
         session: AsyncSession,
         user: User,

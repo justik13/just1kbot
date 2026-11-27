@@ -341,6 +341,382 @@ async def _run_topology_sync_with_retry_tracking(context: str) -> None:
         )
 
 
+def _build_bridge_problem_alert(
+    ru_srv: Server,
+    eu_srv: Server,
+    eu_ip: str,
+    err_detail: str,
+    remaining_eu: int,
+) -> str:
+    """Format ALERT_BRIDGE_TSPU_PROBLEM with consistent fallback wording."""
+    action_text = (
+        f"Трафик автоматически переключён на резервный шлюз (доступно: {remaining_eu})."
+        if remaining_eu >= 1
+        else "Резервных шлюзов нет — маршрут оставлен в качестве fallback."
+    )
+    return ALERT_BRIDGE_TSPU_PROBLEM.format(
+        ru_name=safe(ru_srv.name),
+        ru_id=ru_srv.id,
+        eu_name=safe(eu_srv.name),
+        eu_id=eu_srv.id,
+        eu_ip=safe(eu_ip),
+        error_detail=safe(err_detail),
+        action_text=action_text,
+    )
+
+
+def _build_bridge_reminder_alert(
+    ru_srv: Server,
+    eu_srv: Server,
+    eu_ip: str,
+    err_detail: str,
+    started_at: float,
+    now_wall: float,
+) -> str:
+    """Format ALERT_BRIDGE_TSPU_PROBLEM_REMINDER with outage duration."""
+    return ALERT_BRIDGE_TSPU_PROBLEM_REMINDER.format(
+        ru_name=safe(ru_srv.name),
+        ru_id=ru_srv.id,
+        eu_name=safe(eu_srv.name),
+        eu_id=eu_srv.id,
+        eu_ip=safe(eu_ip),
+        error_detail=safe(err_detail),
+        hours_text=_format_outage_duration(max(60.0, now_wall - started_at)),
+    )
+
+
+async def _try_reenable_hosting_limit_server(
+    bot: Bot,
+    server: Server,
+    st: ServerMonitorState,
+) -> tuple[bool, ServerMonitorState, bool]:
+    """Re-enable a node disabled for HOSTING_TRAFFIC_LIMIT once a new billing cycle < 90% starts.
+
+    Returns (re_enabled, monitor_state, topology_dirty).
+    """
+    if getattr(server, "disabled_reason", None) != "HOSTING_TRAFFIC_LIMIT":
+        return False, st, False
+
+    extra = dict(server.extra_data or {})
+    usage = get_server_hosting_usage(extra)
+    alert_cycle = extra.get("hosting_alert_cycle")
+    if not (
+        usage.limit_gb is not None
+        and alert_cycle
+        and usage.current_cycle != alert_cycle
+        and usage.pct < 90.0
+    ):
+        return False, st, False
+
+    re_enabled = False
+    async with session_scope() as session:
+        fresh = await get_server_by_id(session, server.id, for_update=True)
+        if (
+            fresh
+            and not fresh.is_active
+            and getattr(fresh, "disabled_reason", None) == "HOSTING_TRAFFIC_LIMIT"
+        ):
+            fresh_extra = dict(fresh.extra_data or {})
+            fresh_usage = get_server_hosting_usage(fresh_extra)
+            fresh_alert_cycle = fresh_extra.get("hosting_alert_cycle")
+            if (
+                fresh_usage.limit_gb is not None
+                and fresh_alert_cycle
+                and fresh_usage.current_cycle != fresh_alert_cycle
+                and fresh_usage.pct < 90.0
+            ):
+                fresh_extra["hosting_alert_level"] = 80 if fresh_usage.pct >= 80.0 else 0
+                fresh_extra["hosting_alert_cycle"] = fresh_usage.current_cycle
+                await update_server(
+                    session,
+                    fresh,
+                    is_active=True,
+                    disabled_reason=None,
+                    disabled_at=None,
+                    health_state=ServerHealthState.ONLINE,
+                    consecutive_fails=0,
+                    consecutive_successes=0,
+                    problem_started_at=None,
+                    next_check_at=None,
+                    last_alert_sent_state=None,
+                    extra_data=fresh_extra,
+                )
+                server.is_active = True
+                server.disabled_reason = None
+                server.disabled_at = None
+                server.health_state = ServerHealthState.ONLINE
+                server.extra_data = fresh_extra
+                reset_server_monitor_state(server.id, ServerHealthState.ONLINE)
+                st = get_server_monitor_state(server.id, server)
+                re_enabled = True
+
+    if re_enabled:
+        try:
+            await _send_admin_alert_msg(
+                bot,
+                ALERT_SERVER_HOSTING_TRAFFIC_RESTORED.format(
+                    server_name=safe(server.name),
+                    cycle=usage.current_cycle,
+                ),
+                reply_markup=get_admin_node_keyboard(server.id),
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to deliver hosting traffic recovery alert for server %d: %s",
+                server.id,
+                exc,
+            )
+    return re_enabled, st, re_enabled
+
+
+async def _evaluate_ru_hub_bridge_health(
+    bot: Bot,
+    server: Server,
+    bridge_health_map: dict[str, Any],
+    eu_hubs_by_id: dict[int, Server],
+    eu_hubs_by_ip: dict[str, Server],
+    eu_hubs_by_domain: dict[str, Server],
+    all_enabled_eu_ids: set[int],
+) -> bool:
+    """Persist per-bridge TSPU block/recovery state for a healthy ru_hub and dispatch alerts.
+
+    Returns True if blocked_eu_ids changed and topology sync is needed.
+    """
+    topology_dirty = False
+    bridge_alerts_to_send: list[tuple[str, str, str, float | None]] = []
+    bridge_lock_key = 9_000_000_000 + int(server.id)
+
+    async with session_scope() as session:
+        bind = getattr(session, "bind", None)
+        if not bind and hasattr(session, "sync_session"):
+            bind = getattr(session.sync_session, "bind", None)
+        if bind and getattr(bind, "dialect", None) and getattr(bind.dialect, "name", None) == "postgresql":
+            got_bridge_lock = bool(await session.scalar(select(func.pg_try_advisory_xact_lock(bridge_lock_key))))
+        else:
+            got_bridge_lock = True
+
+        if got_bridge_lock:
+            fresh_ru = await get_server_by_id(session, server.id, for_update=True)
+            if fresh_ru is None:
+                logger.debug(
+                    "ru_hub %d was deleted during health check; skipping bridge TSPU state/alerts.",
+                    server.id,
+                )
+            else:
+                ru_extra = dict(fresh_ru.extra_data or {})
+                bh_state: dict[str, dict[str, Any]] = dict(ru_extra.get("bridge_health_state") or {})
+                prev_blocked = {int(x) for x in (ru_extra.get("blocked_eu_ids") or []) if str(x).isdigit()}
+                new_blocked = {eid for eid in prev_blocked if eid in all_enabled_eu_ids}
+                bh_changed = new_blocked != prev_blocked
+                now_wall = time.time()
+
+                # Prune state entries only for deleted/admin-disabled eu_hubs (not transient WAITING_CONFIRMATION)
+                for stale_k in list(bh_state.keys()):
+                    if not stale_k.isdigit() or int(stale_k) not in all_enabled_eu_ids:
+                        bh_state.pop(stale_k, None)
+                        bh_changed = True
+
+                def _count_remaining_online_eus() -> int:
+                    live_online = {
+                        eid
+                        for eid, esrv in eu_hubs_by_id.items()
+                        if eid in all_enabled_eu_ids
+                        and esrv.is_active
+                        and esrv.health_state == ServerHealthState.ONLINE
+                        and get_server_monitor_state(eid, esrv).health_state == ServerHealthState.ONLINE
+                    }
+                    return len(live_online - new_blocked)
+
+                def _maybe_queue_reminder(entry: dict[str, Any], eu_key: str, eu_srv: Server, eu_ip: str, err_detail: str) -> None:
+                    last_rem = entry.get("last_reminder_at")
+                    if isinstance(last_rem, (int, float)) and (now_wall - float(last_rem)) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
+                        started = float(entry.get("started_at") or last_rem)
+                        bridge_alerts_to_send.append((
+                            "reminder",
+                            eu_key,
+                            _build_bridge_reminder_alert(server, eu_srv, eu_ip, err_detail, started, now_wall),
+                            now_wall,
+                        ))
+
+                for eu_ip, probe_info in bridge_health_map.items():
+                    if not isinstance(probe_info, dict):
+                        continue
+                    eu_srv = eu_hubs_by_ip.get(str(eu_ip).strip())
+                    if eu_srv is None:
+                        probe_sni = str(probe_info.get("sni") or "").strip().lower().rstrip(".")
+                        if probe_sni:
+                            eu_srv = eu_hubs_by_domain.get(probe_sni)
+                    if (
+                        not eu_srv
+                        or eu_srv.id not in all_enabled_eu_ids
+                        or not eu_srv.is_active
+                        or eu_srv.health_state != ServerHealthState.ONLINE
+                        or get_server_monitor_state(eu_srv.id, eu_srv).health_state != ServerHealthState.ONLINE
+                    ):
+                        continue
+
+                    eu_key = str(eu_srv.id)
+                    entry = dict(bh_state.get(eu_key) or {})
+                    was_blocked = bool(entry.get("blocked", False))
+                    probe_ok = bool(probe_info.get("ok", False))
+                    err_detail = str(probe_info.get("error") or "probe failed")
+                    raw_checked_at = probe_info.get("checked_at")
+                    probe_checked_at = float(raw_checked_at) if isinstance(raw_checked_at, (int, float)) else None
+                    is_duplicate_sample = (
+                        probe_checked_at is not None
+                        and entry.get("last_checked_at") == probe_checked_at
+                    )
+
+                    if is_duplicate_sample:
+                        if was_blocked:
+                            new_blocked.add(eu_srv.id)
+                            if entry.get("problem_alert_sent") is False:
+                                bridge_alerts_to_send.append((
+                                    "problem",
+                                    eu_key,
+                                    _build_bridge_problem_alert(
+                                        server, eu_srv, eu_ip, err_detail, _count_remaining_online_eus()
+                                    ),
+                                    now_wall,
+                                ))
+                            else:
+                                _maybe_queue_reminder(entry, eu_key, eu_srv, eu_ip, err_detail)
+                        continue
+
+                    if probe_checked_at is not None:
+                        entry["last_checked_at"] = probe_checked_at
+
+                    if not probe_ok:
+                        fails = int(entry.get("fails", 0) or 0) + 1
+                        entry["fails"] = fails
+                        entry["successes"] = 0
+                        entry["last_error"] = err_detail
+                        bh_changed = True
+
+                        if not was_blocked and fails >= REQUIRED_BRIDGE_FAILS:
+                            entry["blocked"] = True
+                            entry["started_at"] = now_wall
+                            entry["problem_alert_sent"] = False
+                            entry["last_reminder_at"] = None
+                            new_blocked.add(eu_srv.id)
+                            bridge_alerts_to_send.append((
+                                "problem",
+                                eu_key,
+                                _build_bridge_problem_alert(
+                                    server, eu_srv, eu_ip, err_detail, _count_remaining_online_eus()
+                                ),
+                                now_wall,
+                            ))
+                        elif was_blocked:
+                            new_blocked.add(eu_srv.id)
+                            if entry.get("problem_alert_sent") is False:
+                                bridge_alerts_to_send.append((
+                                    "problem",
+                                    eu_key,
+                                    _build_bridge_problem_alert(
+                                        server, eu_srv, eu_ip, err_detail, _count_remaining_online_eus()
+                                    ),
+                                    now_wall,
+                                ))
+                            else:
+                                last_rem = entry.get("last_reminder_at")
+                                if not isinstance(last_rem, (int, float)):
+                                    entry["last_reminder_at"] = now_wall
+                                    bh_changed = True
+                                else:
+                                    _maybe_queue_reminder(entry, eu_key, eu_srv, eu_ip, err_detail)
+                    else:
+                        succs = int(entry.get("successes", 0) or 0) + 1
+                        entry["successes"] = succs
+                        entry["fails"] = 0
+                        entry["last_error"] = None
+                        if was_blocked and succs >= REQUIRED_BRIDGE_SUCCESSES:
+                            entry["blocked"] = False
+                            entry["started_at"] = None
+                            entry["last_reminder_at"] = None
+                            entry.pop("problem_alert_sent", None)
+                            new_blocked.discard(eu_srv.id)
+                            bridge_alerts_to_send.append((
+                                "restored",
+                                eu_key,
+                                ALERT_BRIDGE_TSPU_RESTORED.format(
+                                    ru_name=safe(server.name),
+                                    ru_id=server.id,
+                                    eu_name=safe(eu_srv.name),
+                                    eu_id=eu_srv.id,
+                                    eu_ip=safe(eu_ip),
+                                ),
+                                None,
+                            ))
+                        elif was_blocked:
+                            new_blocked.add(eu_srv.id)
+                        bh_changed = True
+
+                    bh_state[eu_key] = entry
+
+                if bh_changed and fresh_ru:
+                    sorted_blocked = sorted(new_blocked)
+                    if sorted_blocked != sorted(prev_blocked):
+                        topology_dirty = True
+                    ru_extra["bridge_health_state"] = bh_state
+                    if sorted_blocked:
+                        ru_extra["blocked_eu_ids"] = sorted_blocked
+                    else:
+                        ru_extra.pop("blocked_eu_ids", None)
+                    await update_server(session, fresh_ru, extra_data=ru_extra)
+                    server.extra_data = ru_extra
+
+    sent_bridge_timestamps: list[tuple[str, str, float]] = []
+    for alert_kind, eu_key, b_alert, reminder_ts in bridge_alerts_to_send:
+        try:
+            sent_ok = await _send_admin_alert_msg(
+                bot,
+                b_alert,
+                reply_markup=get_admin_node_keyboard(server.id),
+            )
+            if sent_ok:
+                if alert_kind in ("problem", "reminder") and reminder_ts is not None:
+                    sent_bridge_timestamps.append((alert_kind, eu_key, reminder_ts))
+            else:
+                logger.warning(
+                    "Bridge TSPU %s alert not delivered for ru_hub %d (eu=%s); will retry.",
+                    alert_kind,
+                    server.id,
+                    eu_key,
+                )
+        except Exception as exc:
+            logger.error("Failed to deliver bridge TSPU alert for ru_hub %d: %s", server.id, exc)
+
+    if sent_bridge_timestamps:
+        try:
+            async with session_scope() as session:
+                fresh_ru_ack = await get_server_by_id(session, server.id, for_update=True)
+                if fresh_ru_ack is not None:
+                    ack_extra = dict(fresh_ru_ack.extra_data or {})
+                    ack_bh = dict(ack_extra.get("bridge_health_state") or {})
+                    ack_changed = False
+                    for alert_kind, eu_key, reminder_ts in sent_bridge_timestamps:
+                        if eu_key in ack_bh and isinstance(ack_bh[eu_key], dict):
+                            ack_entry = dict(ack_bh[eu_key])
+                            ack_entry["last_reminder_at"] = reminder_ts
+                            if alert_kind == "problem":
+                                ack_entry["problem_alert_sent"] = True
+                            ack_bh[eu_key] = ack_entry
+                            ack_changed = True
+                    if ack_changed:
+                        ack_extra["bridge_health_state"] = ack_bh
+                        await update_server(session, fresh_ru_ack, extra_data=ack_extra)
+                        server.extra_data = ack_extra
+        except Exception as ack_exc:
+            logger.warning(
+                "Failed to persist bridge alert timestamps for ru_hub %d: %s",
+                server.id,
+                ack_exc,
+            )
+
+    return topology_dirty
+
+
 async def check_node_resources_and_alerts(bot: Bot):
     async with session_scope() as session:
         servers = await get_all_servers(session)
@@ -392,74 +768,9 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         # 1. Если сервер отключён — проверяем причину; при HOSTING_TRAFFIC_LIMIT и новом цикле (< 90%) включаем обратно
         if not server.is_active:
-            if getattr(server, "disabled_reason", None) == "HOSTING_TRAFFIC_LIMIT":
-                extra = dict(server.extra_data or {})
-                usage = get_server_hosting_usage(extra)
-                alert_cycle = extra.get("hosting_alert_cycle")
-                if (
-                    usage.limit_gb is not None
-                    and alert_cycle
-                    and usage.current_cycle != alert_cycle
-                    and usage.pct < 90.0
-                ):
-                    re_enabled = False
-                    async with session_scope() as session:
-                        fresh = await get_server_by_id(session, server.id, for_update=True)
-                        if (
-                            fresh
-                            and not fresh.is_active
-                            and getattr(fresh, "disabled_reason", None) == "HOSTING_TRAFFIC_LIMIT"
-                        ):
-                            fresh_extra = dict(fresh.extra_data or {})
-                            fresh_usage = get_server_hosting_usage(fresh_extra)
-                            fresh_alert_cycle = fresh_extra.get("hosting_alert_cycle")
-                            if (
-                                fresh_usage.limit_gb is not None
-                                and fresh_alert_cycle
-                                and fresh_usage.current_cycle != fresh_alert_cycle
-                                and fresh_usage.pct < 90.0
-                            ):
-                                fresh_extra["hosting_alert_level"] = 80 if fresh_usage.pct >= 80.0 else 0
-                                fresh_extra["hosting_alert_cycle"] = fresh_usage.current_cycle
-                                await update_server(
-                                    session,
-                                    fresh,
-                                    is_active=True,
-                                    disabled_reason=None,
-                                    disabled_at=None,
-                                    health_state=ServerHealthState.ONLINE,
-                                    consecutive_fails=0,
-                                    consecutive_successes=0,
-                                    problem_started_at=None,
-                                    next_check_at=None,
-                                    last_alert_sent_state=None,
-                                    extra_data=fresh_extra,
-                                )
-                                server.is_active = True
-                                server.disabled_reason = None
-                                server.disabled_at = None
-                                server.health_state = ServerHealthState.ONLINE
-                                server.extra_data = fresh_extra
-                                reset_server_monitor_state(server.id, ServerHealthState.ONLINE)
-                                st = get_server_monitor_state(server.id, server)
-                                re_enabled = True
-                                topology_dirty = True
-                    if re_enabled:
-                        try:
-                            await _send_admin_alert_msg(
-                                bot,
-                                ALERT_SERVER_HOSTING_TRAFFIC_RESTORED.format(
-                                    server_name=safe(server.name),
-                                    cycle=usage.current_cycle,
-                                ),
-                                reply_markup=get_admin_node_keyboard(server.id),
-                            )
-                        except Exception as exc:
-                            logger.error(
-                                "Failed to deliver hosting traffic recovery alert for server %d: %s",
-                                server.id,
-                                exc,
-                            )
+            _re_enabled, st, dirty_delta = await _try_reenable_hosting_limit_server(bot, server, st)
+            if dirty_delta:
+                topology_dirty = True
             if not server.is_active:
                 st.health_state = ServerHealthState.MANUAL_DISABLED
                 return
@@ -507,7 +818,6 @@ async def check_node_resources_and_alerts(bot: Bot):
         is_healthy = False
         xray_epoch = None
         xray_data = None
-        node_status_data: dict[str, Any] | None = None
         xray_ok = True
 
         if has_xray:
@@ -529,30 +839,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                         xray_ok, xray_epoch, xray_data = await xray_client.check_health(
                             xray_url, server.api_key
                         )
-                        if (
-                            xray_ok
-                            and get_server_role(server) == "ru_hub"
-                            and hasattr(xray_client, "get_node_status")
-                        ):
-                            try:
-                                st_ok, st_data, _ = await xray_client.get_node_status(
-                                    xray_url, server.api_key
-                                )
-                                if st_ok and isinstance(st_data, dict):
-                                    node_status_data = st_data
-                                    if isinstance(xray_data, dict):
-                                        if isinstance(st_data.get("sni_routes"), list):
-                                            xray_data["sni_routes"] = st_data["sni_routes"]
-                                        if isinstance(st_data.get("xhttp_locations"), list) and "xhttp_locations" not in xray_data:
-                                            xray_data["xhttp_locations"] = st_data["xhttp_locations"]
-                                        if isinstance(st_data.get("links"), dict):
-                                            xray_data["links"] = st_data["links"]
-                            except Exception as st_exc:
-                                logger.debug(
-                                    "Node status sync skipped for ru_hub %s: %s",
-                                    server.id,
-                                    st_exc,
-                                )
             except Exception as exc:
                 logger.warning(
                     "Xray healthcheck exception for server %s (%s): %s",
@@ -914,291 +1200,16 @@ async def check_node_resources_and_alerts(bot: Bot):
                     logger.error("Failed to deliver %s alert for server %d: %s", alert_kind, server.id, e)
 
         if is_healthy and get_server_role(server) == "ru_hub" and isinstance(xray_data, dict) and isinstance(xray_data.get("bridge_health"), dict):
-            bridge_health_map = xray_data["bridge_health"]
-            bridge_alerts_to_send: list[tuple[str, str, str, float | None]] = []
-            bridge_lock_key = 9_000_000_000 + int(server.id)
-            async with session_scope() as session:
-                bind = getattr(session, "bind", None)
-                if not bind and hasattr(session, "sync_session"):
-                    bind = getattr(session.sync_session, "bind", None)
-                if bind and getattr(bind, "dialect", None) and getattr(bind.dialect, "name", None) == "postgresql":
-                    got_bridge_lock = bool(await session.scalar(select(func.pg_try_advisory_xact_lock(bridge_lock_key))))
-                else:
-                    got_bridge_lock = True
-
-                if got_bridge_lock:
-                    fresh_ru = await get_server_by_id(session, server.id, for_update=True)
-                    if fresh_ru is None:
-                        logger.debug(
-                            "ru_hub %d was deleted during health check; skipping bridge TSPU state/alerts.",
-                            server.id,
-                        )
-                    else:
-                        ru_extra = dict(fresh_ru.extra_data or {})
-                        bh_state: dict[str, dict[str, Any]] = dict(ru_extra.get("bridge_health_state") or {})
-                        prev_blocked = {int(x) for x in (ru_extra.get("blocked_eu_ids") or []) if str(x).isdigit()}
-                        new_blocked = {eid for eid in prev_blocked if eid in all_enabled_eu_ids}
-                        bh_changed = new_blocked != prev_blocked
-                        now_wall = time.time()
-
-                        # Prune state entries only for deleted/admin-disabled eu_hubs (not transient WAITING_CONFIRMATION)
-                        for stale_k in list(bh_state.keys()):
-                            if not stale_k.isdigit() or int(stale_k) not in all_enabled_eu_ids:
-                                bh_state.pop(stale_k, None)
-                                bh_changed = True
-
-                        def _count_remaining_online_eus() -> int:
-                            live_online = {
-                                eid
-                                for eid, esrv in eu_hubs_by_id.items()
-                                if eid in all_enabled_eu_ids
-                                and esrv.is_active
-                                and esrv.health_state == ServerHealthState.ONLINE
-                                and get_server_monitor_state(eid, esrv).health_state == ServerHealthState.ONLINE
-                            }
-                            return len(live_online - new_blocked)
-
-                        for eu_ip, probe_info in bridge_health_map.items():
-                            if not isinstance(probe_info, dict):
-                                continue
-                            eu_srv = eu_hubs_by_ip.get(str(eu_ip).strip())
-                            if eu_srv is None:
-                                probe_sni = str(probe_info.get("sni") or "").strip().lower().rstrip(".")
-                                if probe_sni:
-                                    eu_srv = eu_hubs_by_domain.get(probe_sni)
-                            if (
-                                not eu_srv
-                                or eu_srv.id not in all_enabled_eu_ids
-                                or not eu_srv.is_active
-                                or eu_srv.health_state != ServerHealthState.ONLINE
-                                or get_server_monitor_state(eu_srv.id, eu_srv).health_state != ServerHealthState.ONLINE
-                            ):
-                                continue
-
-                            eu_key = str(eu_srv.id)
-                            entry = dict(bh_state.get(eu_key) or {})
-                            was_blocked = bool(entry.get("blocked", False))
-                            probe_ok = bool(probe_info.get("ok", False))
-                            err_detail = str(probe_info.get("error") or "probe failed")
-                            raw_checked_at = probe_info.get("checked_at")
-                            probe_checked_at = float(raw_checked_at) if isinstance(raw_checked_at, (int, float)) else None
-                            is_duplicate_sample = (
-                                probe_checked_at is not None
-                                and entry.get("last_checked_at") == probe_checked_at
-                            )
-
-                            if is_duplicate_sample:
-                                if was_blocked:
-                                    new_blocked.add(eu_srv.id)
-                                    if entry.get("problem_alert_sent") is False:
-                                        remaining_eu = _count_remaining_online_eus()
-                                        action_text = (
-                                            f"Трафик автоматически переключён на резервный шлюз (доступно: {remaining_eu})."
-                                            if remaining_eu >= 1
-                                            else "Резервных шлюзов нет — маршрут оставлен в качестве fallback."
-                                        )
-                                        bridge_alerts_to_send.append((
-                                            "problem",
-                                            eu_key,
-                                            ALERT_BRIDGE_TSPU_PROBLEM.format(
-                                                ru_name=safe(server.name),
-                                                ru_id=server.id,
-                                                eu_name=safe(eu_srv.name),
-                                                eu_id=eu_srv.id,
-                                                eu_ip=safe(eu_ip),
-                                                error_detail=safe(err_detail),
-                                                action_text=action_text,
-                                            ),
-                                            now_wall,
-                                        ))
-                                    else:
-                                        last_rem = entry.get("last_reminder_at")
-                                        if isinstance(last_rem, (int, float)) and (now_wall - float(last_rem)) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
-                                            started = float(entry.get("started_at") or last_rem)
-                                            bridge_alerts_to_send.append((
-                                                "reminder",
-                                                eu_key,
-                                                ALERT_BRIDGE_TSPU_PROBLEM_REMINDER.format(
-                                                    ru_name=safe(server.name),
-                                                    ru_id=server.id,
-                                                    eu_name=safe(eu_srv.name),
-                                                    eu_id=eu_srv.id,
-                                                    eu_ip=safe(eu_ip),
-                                                    error_detail=safe(err_detail),
-                                                    hours_text=_format_outage_duration(max(60.0, now_wall - started)),
-                                                ),
-                                                now_wall,
-                                            ))
-                                continue
-
-                            if probe_checked_at is not None:
-                                entry["last_checked_at"] = probe_checked_at
-
-                            if not probe_ok:
-                                fails = int(entry.get("fails", 0) or 0) + 1
-                                entry["fails"] = fails
-                                entry["successes"] = 0
-                                entry["last_error"] = err_detail
-                                bh_changed = True
-
-                                if not was_blocked and fails >= REQUIRED_BRIDGE_FAILS:
-                                    entry["blocked"] = True
-                                    entry["started_at"] = now_wall
-                                    entry["problem_alert_sent"] = False
-                                    entry["last_reminder_at"] = None
-                                    new_blocked.add(eu_srv.id)
-                                    remaining_eu = _count_remaining_online_eus()
-                                    action_text = (
-                                        f"Трафик автоматически переключён на резервный шлюз (доступно: {remaining_eu})."
-                                        if remaining_eu >= 1
-                                        else "Резервных шлюзов нет — маршрут оставлен в качестве fallback."
-                                    )
-                                    bridge_alerts_to_send.append((
-                                        "problem",
-                                        eu_key,
-                                        ALERT_BRIDGE_TSPU_PROBLEM.format(
-                                            ru_name=safe(server.name),
-                                            ru_id=server.id,
-                                            eu_name=safe(eu_srv.name),
-                                            eu_id=eu_srv.id,
-                                            eu_ip=safe(eu_ip),
-                                            error_detail=safe(err_detail),
-                                            action_text=action_text,
-                                        ),
-                                        now_wall,
-                                    ))
-                                elif was_blocked:
-                                    new_blocked.add(eu_srv.id)
-                                    if entry.get("problem_alert_sent") is False:
-                                        remaining_eu = _count_remaining_online_eus()
-                                        action_text = (
-                                            f"Трафик автоматически переключён на резервный шлюз (доступно: {remaining_eu})."
-                                            if remaining_eu >= 1
-                                            else "Резервных шлюзов нет — маршрут оставлен в качестве fallback."
-                                        )
-                                        bridge_alerts_to_send.append((
-                                            "problem",
-                                            eu_key,
-                                            ALERT_BRIDGE_TSPU_PROBLEM.format(
-                                                ru_name=safe(server.name),
-                                                ru_id=server.id,
-                                                eu_name=safe(eu_srv.name),
-                                                eu_id=eu_srv.id,
-                                                eu_ip=safe(eu_ip),
-                                                error_detail=safe(err_detail),
-                                                action_text=action_text,
-                                            ),
-                                            now_wall,
-                                        ))
-                                    else:
-                                        last_rem = entry.get("last_reminder_at")
-                                        if not isinstance(last_rem, (int, float)):
-                                            entry["last_reminder_at"] = now_wall
-                                            bh_changed = True
-                                        elif (now_wall - float(last_rem)) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
-                                            started = float(entry.get("started_at") or last_rem)
-                                            bridge_alerts_to_send.append((
-                                                "reminder",
-                                                eu_key,
-                                                ALERT_BRIDGE_TSPU_PROBLEM_REMINDER.format(
-                                                    ru_name=safe(server.name),
-                                                    ru_id=server.id,
-                                                    eu_name=safe(eu_srv.name),
-                                                    eu_id=eu_srv.id,
-                                                    eu_ip=safe(eu_ip),
-                                                    error_detail=safe(err_detail),
-                                                    hours_text=_format_outage_duration(max(60.0, now_wall - started)),
-                                                ),
-                                                now_wall,
-                                            ))
-                            else:
-                                succs = int(entry.get("successes", 0) or 0) + 1
-                                entry["successes"] = succs
-                                entry["fails"] = 0
-                                entry["last_error"] = None
-                                if was_blocked and succs >= REQUIRED_BRIDGE_SUCCESSES:
-                                    entry["blocked"] = False
-                                    entry["started_at"] = None
-                                    entry["last_reminder_at"] = None
-                                    entry.pop("problem_alert_sent", None)
-                                    new_blocked.discard(eu_srv.id)
-                                    bridge_alerts_to_send.append((
-                                        "restored",
-                                        eu_key,
-                                        ALERT_BRIDGE_TSPU_RESTORED.format(
-                                            ru_name=safe(server.name),
-                                            ru_id=server.id,
-                                            eu_name=safe(eu_srv.name),
-                                            eu_id=eu_srv.id,
-                                            eu_ip=safe(eu_ip),
-                                        ),
-                                        None,
-                                    ))
-                                elif was_blocked:
-                                    new_blocked.add(eu_srv.id)
-                                bh_changed = True
-
-                            bh_state[eu_key] = entry
-
-                        if bh_changed and fresh_ru:
-                            sorted_blocked = sorted(new_blocked)
-                            if sorted_blocked != sorted(prev_blocked):
-                                topology_dirty = True
-                            ru_extra["bridge_health_state"] = bh_state
-                            if sorted_blocked:
-                                ru_extra["blocked_eu_ids"] = sorted_blocked
-                            else:
-                                ru_extra.pop("blocked_eu_ids", None)
-                            await update_server(session, fresh_ru, extra_data=ru_extra)
-                            server.extra_data = ru_extra
-
-            sent_bridge_timestamps: list[tuple[str, str, float]] = []
-            for alert_kind, eu_key, b_alert, reminder_ts in bridge_alerts_to_send:
-                try:
-                    sent_ok = await _send_admin_alert_msg(
-                        bot,
-                        b_alert,
-                        reply_markup=get_admin_node_keyboard(server.id),
-                    )
-                    if sent_ok:
-                        if alert_kind in ("problem", "reminder") and reminder_ts is not None:
-                            sent_bridge_timestamps.append((alert_kind, eu_key, reminder_ts))
-                    else:
-                        logger.warning(
-                            "Bridge TSPU %s alert not delivered for ru_hub %d (eu=%s); will retry.",
-                            alert_kind,
-                            server.id,
-                            eu_key,
-                        )
-                except Exception as exc:
-                    logger.error("Failed to deliver bridge TSPU alert for ru_hub %d: %s", server.id, exc)
-
-            if sent_bridge_timestamps:
-                try:
-                    async with session_scope() as session:
-                        fresh_ru_ack = await get_server_by_id(session, server.id, for_update=True)
-                        if fresh_ru_ack is not None:
-                            ack_extra = dict(fresh_ru_ack.extra_data or {})
-                            ack_bh = dict(ack_extra.get("bridge_health_state") or {})
-                            ack_changed = False
-                            for alert_kind, eu_key, reminder_ts in sent_bridge_timestamps:
-                                if eu_key in ack_bh and isinstance(ack_bh[eu_key], dict):
-                                    ack_entry = dict(ack_bh[eu_key])
-                                    ack_entry["last_reminder_at"] = reminder_ts
-                                    if alert_kind == "problem":
-                                        ack_entry["problem_alert_sent"] = True
-                                    ack_bh[eu_key] = ack_entry
-                                    ack_changed = True
-                            if ack_changed:
-                                ack_extra["bridge_health_state"] = ack_bh
-                                await update_server(session, fresh_ru_ack, extra_data=ack_extra)
-                                server.extra_data = ack_extra
-                except Exception as ack_exc:
-                    logger.warning(
-                        "Failed to persist bridge alert timestamps for ru_hub %d: %s",
-                        server.id,
-                        ack_exc,
-                    )
+            if await _evaluate_ru_hub_bridge_health(
+                bot,
+                server,
+                xray_data["bridge_health"],
+                eu_hubs_by_id,
+                eu_hubs_by_ip,
+                eu_hubs_by_domain,
+                all_enabled_eu_ids,
+            ):
+                topology_dirty = True
 
         hosting_auto_disabled = False
         if is_healthy:
@@ -1441,7 +1452,7 @@ async def check_node_resources_and_alerts(bot: Bot):
         }
 
         if is_xray_node and isinstance(xray_data, dict) and xray_data:
-            extra_update = _build_v2_extra_patch(server.extra_data, node_status_data, xray_data)
+            extra_update = _build_v2_extra_patch(server.extra_data, None, xray_data)
             if extra_update:
                 update_kwargs["extra_data"] = extra_update
 
@@ -1449,7 +1460,7 @@ async def check_node_resources_and_alerts(bot: Bot):
             update_kwargs["last_successful_check"] = now_utc()
             if is_xray_node and xray_data:
                 if xray_data.get("role") or xray_data.get("capabilities"):
-                    derived_caps = derive_v2_capabilities(node_status_data, xray_data)
+                    derived_caps = derive_v2_capabilities(None, xray_data)
                     if derived_caps and sorted(derived_caps) != sorted(server.capabilities or []):
                         update_kwargs["capabilities"] = derived_caps
 
@@ -1489,7 +1500,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                     # Синхронизация динамических метаданных и health-полей при изменениях на ноде
                     if xray_data and isinstance(xray_data, dict):
                         extra_patch = _build_v2_extra_patch(
-                            updated_srv.extra_data, node_status_data, xray_data
+                            updated_srv.extra_data, None, xray_data
                         )
                         extra = dict(updated_srv.extra_data or {})
                         extra_changed = bool(extra_patch)

@@ -298,10 +298,13 @@ async def _probe_v2_node(
         timeout=8.0,
         max_retries=1,
     ) as client:
-        status_ok, status_data, status_err = await client.get_node_status(api_url, api_key)
+        # /v1/health already embeds the full /v1/node/status payload; fall back to /v1/node/status only if health fails.
         health_ok, _epoch, health_data = await client.check_health(api_url, api_key)
+        if isinstance(health_data, dict):
+            return health_data, health_data, (health_ok or True), None
+        status_ok, status_data, status_err = await client.get_node_status(api_url, api_key)
 
-    return status_data, health_data, (status_ok or health_ok), status_err
+    return status_data, None, status_ok, status_err
 
 
 async def list_nodes(session: AsyncSession) -> list[dict[str, Any]]:
@@ -481,87 +484,6 @@ def _queue_topology_sync(session: AsyncSession) -> None:
             )
 
     queue_post_commit_task(session, _sync_topology)
-
-
-async def refresh_node(
-    *,
-    admin_id: int,
-    server_id: int,
-) -> dict[str, Any]:
-    """Re-query /v1/node/status and /v1/health outside DB transaction and synchronize DB metadata."""
-    async with session_scope() as session:
-        server_ro = await get_server_by_id(session, server_id, for_update=False)
-        if server_ro is None:
-            raise AdminNodeServiceError("Node not found", status_code=404)
-        api_url, api_key = server_ro.api_url, server_ro.api_key
-    status_data, health_data, probe_ok, probe_error = await _probe_v2_node(
-        api_url,
-        api_key,
-    )
-    if not probe_ok:
-        raise AdminNodeServiceError(
-            f"Node unreachable: {probe_error or 'probe failed'}",
-            status_code=502,
-        )
-
-    resolved_ip = ""
-    if api_url:
-        host = urlparse(api_url).hostname or ""
-        resolved_ip = await _resolve_hostname_ipv4(host) if host else ""
-
-    async def _apply_refresh(s: AsyncSession) -> dict[str, Any]:
-        server = await get_server_by_id(s, server_id, for_update=True)
-        if server is None:
-            raise AdminNodeServiceError("Node not found", status_code=404)
-
-        extra_cur = server.extra_data if isinstance(server.extra_data, dict) else {}
-        caps = derive_v2_capabilities(status_data, health_data)
-        extra = merge_v2_extra_data(extra_cur, status_data, health_data)
-        if resolved_ip:
-            extra["ip"] = resolved_ip
-        role = extra.get("role")
-        if role == "exit_node":
-            extra["location_code"] = await _ensure_unique_exit_location_code(
-                s, server.id, extra.get("location_code")
-            )
-        updates: dict[str, Any] = {
-            "capabilities": caps or list(server.capabilities or []),
-            "extra_data": extra,
-            "protocol": _derive_protocol(caps, role),
-        }
-        if isinstance(status_data, dict):
-            cc = str(status_data.get("country_code") or "").strip()
-            if cc and (not server.country_flag or server.country_flag == "🌐"):
-                cc_flag = country_code_to_flag(cc)
-                if cc_flag:
-                    updates["country_flag"] = cc_flag
-        if isinstance(health_data, dict) and health_data.get("status") == "ok":
-            if server.is_active:
-                updates["health_state"] = ServerHealthState.ONLINE
-            updates["last_successful_check"] = now_utc()
-            updates["consecutive_fails"] = 0
-            if health_data.get("node_epoch"):
-                updates["xray_instance_epoch"] = str(health_data.get("node_epoch"))
-            if health_data.get("boot_id"):
-                updates["xray_instance_boot_id"] = str(health_data.get("boot_id"))
-            if health_data.get("starttime") is not None:
-                updates["xray_instance_starttime"] = int(health_data["starttime"])
-
-        updated = await update_server(s, server, **updates)
-        _queue_topology_sync(s)
-        await AuditService.log_action(
-            s,
-            admin_id=admin_id,
-            action=AdminAuditAction.EDIT_SERVER,
-            target_type="server",
-            target_id=updated.id,
-            details={"action": "refresh", "role": role},
-        )
-        logger.info("Admin %s refreshed v2 node %s (role=%s)", admin_id, server.id, role)
-        return serialize_server_node(updated)
-
-    async with session_scope() as session:
-        return await _apply_refresh(session)
 
 
 async def update_node_settings(

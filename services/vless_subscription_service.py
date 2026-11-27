@@ -467,23 +467,6 @@ class VlessSubscriptionService:
             )
         return links
 
-    @staticmethod
-    def build_subscription_url(token: str, domain: str | None = None) -> str:
-        """Construct full public subscription URL for standard VLESS feed."""
-        if not domain:
-            try:
-                from config.settings import get_settings
-                settings = get_settings()
-                domain = settings.SUBSCRIPTION_DOMAIN or settings.DOMAIN
-            except Exception:
-                domain = None
-        if not domain:
-            domain = os.getenv("SUBSCRIPTION_DOMAIN") or os.getenv("DOMAIN") or os.getenv("BOT_DOMAIN")
-        if not domain:
-            raise ValueError("No public DOMAIN configured for subscription URLs")
-        clean_domain = domain.strip().replace("https://", "").replace("http://", "").rstrip("/")
-        return f"https://{clean_domain}/sub/{token}"
-
     @classmethod
     def ensure_synced_background(
         cls, user_id: int, is_active: bool | None = None, *, session: AsyncSession | None = None
@@ -719,21 +702,6 @@ class VlessSubscriptionService:
                 continue
             targets.append((srv.id, api_url, api_key))
         return targets
-
-    @staticmethod
-    async def _execute_sync_to_nodes(
-        targets: list[tuple[int, str, str]],
-        client_uuid: str,
-        desired_active: bool,
-        version: int | None = None,
-        user_id: int | None = None,
-        sub_id: int | None = None,
-        email: str | None = None,
-    ) -> dict[int, bool]:
-        results, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
-            targets, client_uuid, desired_active, version=version, user_id=user_id, sub_id=sub_id, email=email
-        )
-        return results
 
     @staticmethod
     async def _execute_sync_to_nodes_with_status(
@@ -1086,31 +1054,6 @@ class VlessSubscriptionService:
             await session.flush()
 
         return results
-
-    @staticmethod
-    async def deprovision_uuid_from_nodes(
-        session: AsyncSession,
-        client_uuid: str,
-        version: int | None = None,
-    ) -> dict[int, bool]:
-        """Deprovision a revoked UUID (and its per-location uuid5 derivatives) across all configured exit nodes."""
-        if not client_uuid:
-            return {}
-
-        servers = await VlessSubscriptionService.get_revocation_target_servers(session)
-        targets = VlessSubscriptionService._extract_node_targets(servers)
-        if not targets:
-            return {}
-        exit_nodes = await VlessSubscriptionService.get_all_exit_nodes_for_revocation(session)
-        uuids_to_deprov = VlessSubscriptionService._expand_revocation_uuids(client_uuid, exit_nodes)
-        combined_results: dict[int, bool] = {}
-        for u in uuids_to_deprov:
-            res = await VlessSubscriptionService._execute_deprovision_on_nodes(
-                targets, u, version=version
-            )
-            for s_id, ok in res.items():
-                combined_results[s_id] = combined_results.get(s_id, True) and ok
-        return combined_results
 
     @classmethod
     async def sync_all_active_to_server(cls, server_id: int) -> int:

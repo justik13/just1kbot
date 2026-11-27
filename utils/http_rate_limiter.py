@@ -33,11 +33,6 @@ def set_dynamic_trusted_proxy_ips(ips: set[str] | list[str] | tuple[str, ...]) -
     _dynamic_trusted_proxy_ips.update(normalized)
 
 
-def get_dynamic_trusted_proxy_ips() -> set[str]:
-    """Return a copy of runtime auto-discovered trusted proxy IPs."""
-    return set(_dynamic_trusted_proxy_ips)
-
-
 def _normalize_ip_obj(raw_ip: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
     try:
         ip_obj = ipaddress.ip_address(raw_ip.strip())

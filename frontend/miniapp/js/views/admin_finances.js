@@ -39,15 +39,6 @@ function _financeStatusChip(status) {
     return `<span class="chip chip-muted">${escapeHtml(status)}</span>`;
 }
 
-function _webhookStatusChip(status) {
-    if (status === "pending") return `<span class="chip chip-warn">Ожидает</span>`;
-    if (status === "processing") return `<span class="chip chip-warn">Обработка</span>`;
-    if (status === "retry") return `<span class="chip chip-warn">Повтор</span>`;
-    if (status === "succeeded") return `<span class="chip chip-ok">Обработан</span>`;
-    if (status === "dead") return `<span class="chip chip-err">Сбой доставки</span>`;
-    return `<span class="chip chip-muted">${escapeHtml(status || "—")}</span>`;
-}
-
 function _formatServiceType(serviceType) {
     if (serviceType === "standard") return "Стандарт";
     if (serviceType === "white_internet") return "Белый интернет";
@@ -124,8 +115,7 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
         offset: 0,
         limit: 25,
     };
-    const auditData = state.auditLogsData || { items: [], actions: [], total: 0, offset: 0, limit: 40 };
-    const webhooksData = state.webhooksData || [];
+    const auditData = state.auditLogsData || { items: [], total: 0, offset: 0, limit: 40 };
     const summary = finData.summary || {};
 
     root.innerHTML = `
@@ -143,40 +133,12 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
                 <button type="button" class="seg-btn ${subTab === "gateway" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="gateway" aria-pressed="${subTab === "gateway" ? "true" : "false"}">Платёжка (ЮKassa)</button>
                 <button type="button" class="seg-btn ${subTab === "topups" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="topups" aria-pressed="${subTab === "topups" ? "true" : "false"}">Пополнения</button>
                 <button type="button" class="seg-btn ${subTab === "audit" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="audit" aria-pressed="${subTab === "audit" ? "true" : "false"}">Аудит</button>
-                <button type="button" class="seg-btn ${subTab === "webhooks" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="webhooks" aria-pressed="${subTab === "webhooks" ? "true" : "false"}">Вебхуки</button>
             </div>
 
             ${
                 subTab === "audit"
                     ? `
                 <form id="auditFilterForm" class="field" style="gap:8px;">
-                    <div class="grid-2">
-                        <label for="auditActionSelect" class="visually-hidden">Действие</label>
-                        <select id="auditActionSelect" class="select">
-                            <option value="">Все действия</option>
-                            ${(auditData.actions || [])
-                                .map(
-                                    (act) =>
-                                        `<option value="${escapeHtml(act)}" ${
-                                            state.auditAction === act ? "selected" : ""
-                                        }>${escapeHtml(formatAuditAction(act))}</option>`
-                                )
-                                .join("")}
-                        </select>
-                        <label for="auditTargetTypeSelect" class="visually-hidden">Тип цели</label>
-                        <select id="auditTargetTypeSelect" class="select">
-                            <option value="" ${!state.auditTargetType ? "selected" : ""}>Все цели</option>
-                            <option value="user" ${state.auditTargetType === "user" ? "selected" : ""}>Пользователь</option>
-                            <option value="server" ${state.auditTargetType === "server" ? "selected" : ""}>Нода</option>
-                            <option value="broadcast" ${state.auditTargetType === "broadcast" ? "selected" : ""}>Рассылка</option>
-                            <option value="system_setting" ${state.auditTargetType === "system_setting" ? "selected" : ""}>Настройки</option>
-                            <option value="system" ${state.auditTargetType === "system" ? "selected" : ""}>Система</option>
-                            <option value="admin" ${state.auditTargetType === "admin" ? "selected" : ""}>Админ</option>
-                            <option value="mass_bonus" ${state.auditTargetType === "mass_bonus" ? "selected" : ""}>Массовый бонус</option>
-                            <option value="mass_extend" ${state.auditTargetType === "mass_extend" ? "selected" : ""}>Массовое продление</option>
-                            <option value="webhook_inbox" ${state.auditTargetType === "webhook_inbox" ? "selected" : ""}>Вебхук</option>
-                        </select>
-                    </div>
                     <div class="row-nowrap">
                         <label for="auditQueryInput" class="visually-hidden">Поиск в аудите</label>
                         <input id="auditQueryInput" class="input" type="search" value="${escapeHtml(
@@ -188,13 +150,6 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
                 <div id="finPagerTop"></div>
                 <div id="finListContainer" class="stack-sm"></div>
                 <div id="finPagerBottom"></div>
-            `
-                    : subTab === "webhooks"
-                    ? `
-                <div class="meta-text">
-                    Последние 30 входящих вебхуков ЮKassa со статусами <span class="mono" style="word-break:normal; white-space:nowrap;">pending / retry / dead</span>.
-                </div>
-                <div id="finListContainer" class="stack-sm"></div>
             `
                     : `
                 <form id="finFilterForm" class="field" style="gap:8px;">
@@ -270,30 +225,10 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
     };
 
     const syncDynamicAudit = () => {
-        const curAudit = state.auditLogsData || { items: [], actions: [], total: 0, offset: 0, limit: 40 };
-        const actionSel = root.querySelector("#auditActionSelect");
-        if (actionSel && Array.isArray(curAudit.actions)) {
-            const curVal = state.auditAction || "";
-            actionSel.innerHTML = `
-                <option value="">Все действия</option>
-                ${curAudit.actions
-                    .map(
-                        (act) =>
-                            `<option value="${escapeHtml(act)}" ${
-                                curVal === act ? "selected" : ""
-                            }>${escapeHtml(formatAuditAction(act))}</option>`
-                    )
-                    .join("")}
-            `;
-        }
+        const curAudit = state.auditLogsData || { items: [], total: 0, offset: 0, limit: 40 };
         listContainer.innerHTML = "";
         _renderAuditRows(listContainer, curAudit.items || [], state);
         _renderPager(root, curAudit, loadAudit, "событий");
-    };
-
-    const syncDynamicWebhooks = () => {
-        listContainer.innerHTML = "";
-        _renderWebhookRows(listContainer, state.webhooksData || [], loadWebhooks);
     };
 
     const loadFinances = async (offset = 0, { attentionOnly = state.finAttentionOnly } = {}) => {
@@ -318,7 +253,7 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
             return true;
         } catch (err) {
             if (!isStillActive(reqId)) return false;
-            if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return false;
+            if (err && err.code === "init_data_expired") return false;
             state.financesLoadAttempted = true;
             showToast(err.message || "Ошибка загрузки финансов", "error");
             renderRetryList(err.message || "Не удалось загрузить финансы", () =>
@@ -332,11 +267,11 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
         const reqId = ++_finViewReqId;
         try {
             const data = await api.listAuditLogs(
-                state.auditAction || "",
+                "",
                 state.auditQuery || "",
                 offset,
                 40,
-                state.auditTargetType || ""
+                ""
             );
             if (!isStillActive(reqId)) return;
             state.auditLogsData = data;
@@ -344,27 +279,10 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
             syncDynamicAudit();
         } catch (err) {
             if (!isStillActive(reqId)) return;
-            if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
+            if (err && err.code === "init_data_expired") return;
             state.auditLoadAttempted = true;
             showToast(err.message || "Ошибка загрузки аудит-лога", "error");
             renderRetryList(err.message || "Не удалось загрузить аудит-лог", () => loadAudit(offset));
-        }
-    };
-
-    const loadWebhooks = async () => {
-        const reqId = ++_finViewReqId;
-        try {
-            const res = await api.getAdminWebhooks();
-            if (!isStillActive(reqId)) return;
-            state.webhooksData = res.webhooks || [];
-            state.webhooksLoadAttempted = true;
-            syncDynamicWebhooks();
-        } catch (err) {
-            if (!isStillActive(reqId)) return;
-            if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
-            state.webhooksLoadAttempted = true;
-            showToast(err.message || "Ошибка загрузки вебхуков", "error");
-            renderRetryList(err.message || "Не удалось загрузить вебхуки", () => loadWebhooks());
         }
     };
 
@@ -386,7 +304,7 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
                     state.paymentsMaintenanceError = false;
                 })
                 .catch((err) => {
-                    if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
+                    if (err && err.code === "init_data_expired") return;
                     state.paymentsMaintenanceError = true;
                     showToast(err.message || "Ошибка загрузки статуса техработ", "error");
                 })
@@ -444,12 +362,6 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
                     state.auditLoadAttempted = false;
                 }
                 renderAdminFinancesView(root, state, { forceRefresh: hadData });
-            } else if (nextSubTab === "webhooks") {
-                const hadData = state.webhooksData != null;
-                if (!hadData) {
-                    state.webhooksLoadAttempted = false;
-                }
-                renderAdminFinancesView(root, state, { forceRefresh: hadData });
             } else {
                 state.financesData = null;
                 state.financesLoadAttempted = false;
@@ -467,8 +379,6 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
                     const qInput = root.querySelector("#auditQueryInput");
                     if (qInput) state.auditQuery = _cleanQuery(qInput.value);
                     await loadAudit((state.auditLogsData && state.auditLogsData.offset) || 0);
-                } else if (subTab === "webhooks") {
-                    await loadWebhooks();
                 } else {
                     const qInput = root.querySelector("#finQueryInput");
                     if (qInput) state.finQuery = _cleanQuery(qInput.value);
@@ -487,8 +397,6 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
     if (subTab === "audit") {
         const auditQueryInput = root.querySelector("#auditQueryInput");
         const syncAuditFilters = () => {
-            state.auditAction = root.querySelector("#auditActionSelect").value;
-            state.auditTargetType = root.querySelector("#auditTargetTypeSelect").value;
             state.auditQuery = _cleanQuery(auditQueryInput.value);
         };
         auditQueryInput.addEventListener("input", () => {
@@ -505,14 +413,6 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
                 await loadAudit(0);
             }
         });
-        root.querySelector("#auditActionSelect").addEventListener("change", async () => {
-            syncAuditFilters();
-            await loadAudit(0);
-        });
-        root.querySelector("#auditTargetTypeSelect").addEventListener("change", async () => {
-            syncAuditFilters();
-            await loadAudit(0);
-        });
         if (state.auditLogsData == null) {
             if (!state.auditLoadAttempted) {
                 listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Загрузка...</div>`;
@@ -525,20 +425,6 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
             _renderPager(root, auditData, loadAudit, "событий");
             if (forceRefresh) {
                 loadAudit(0);
-            }
-        }
-    } else if (subTab === "webhooks") {
-        if (state.webhooksData == null) {
-            if (!state.webhooksLoadAttempted) {
-                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Загрузка...</div>`;
-                loadWebhooks();
-            } else {
-                renderRetryList("Не удалось загрузить вебхуки", () => loadWebhooks());
-            }
-        } else {
-            _renderWebhookRows(listContainer, webhooksData, loadWebhooks);
-            if (forceRefresh) {
-                loadWebhooks();
             }
         }
     } else {
@@ -760,102 +646,6 @@ function _renderAuditRows(container, items, state) {
                     }
                 });
             }
-        }
-        container.appendChild(row);
-    });
-}
-
-function _renderWebhookRows(container, items, reloadWebhooks = null) {
-    if (!items.length) {
-        container.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Проблемных или ожидающих вебхуков нет</div>`;
-        return;
-    }
-    items.forEach((wh) => {
-        const row = document.createElement("div");
-        row.className = "item-row";
-        const eventKey = wh.event_key || wh.event_id || "";
-        const receivedTs = wh.received_at || wh.created_at;
-        const receivedStr = receivedTs ? `${formatRelativeTime(receivedTs)} (${formatDate(receivedTs)})` : "—";
-        const statusLower = String(wh.status || "").toLowerCase();
-        const canAct = wh.id != null && (statusLower === "dead" || statusLower === "retry");
-        row.innerHTML = `
-            <div class="row">
-                <span class="mono" style="font-weight:600; font-size:12px;">${escapeHtml(wh.event_type || "—")}</span>
-                ${_webhookStatusChip(wh.status)}
-            </div>
-            <div class="row meta-text">
-                <span>Получен: ${escapeHtml(receivedStr)}</span>
-            </div>
-            ${
-                eventKey
-                    ? `<div class="meta-text" style="word-break:break-all;">Ключ: <span class="mono">${escapeHtml(eventKey)}</span></div>`
-                    : ""
-            }
-            <div class="row meta-text">
-                <span>Заказ: <span class="mono">${escapeHtml(wh.public_order_id || "—")}</span></span>
-                ${
-                    wh.public_order_id
-                        ? `<button type="button" class="mono-copy" data-copy-wh-order="${escapeHtml(wh.public_order_id)}">Копировать заказ</button>`
-                        : ""
-                }
-            </div>
-            ${
-                wh.payment_external_id
-                    ? `<div class="row meta-text">
-                        <span>Платёж: <span class="mono">${escapeHtml(wh.payment_external_id)}</span></span>
-                        <button type="button" class="mono-copy" data-copy-wh-payment="${escapeHtml(wh.payment_external_id)}">Копировать платёж</button>
-                    </div>`
-                    : ""
-            }
-            ${
-                canAct
-                    ? `<div class="actions-row" style="margin-top:4px;">
-                        <button type="button" class="btn btn-sm" data-retry-wh="${escapeHtml(wh.id)}">Повторить</button>
-                        <button type="button" class="btn btn-sm btn-danger" data-dismiss-wh="${escapeHtml(wh.id)}">Скрыть</button>
-                    </div>`
-                    : ""
-            }
-        `;
-        const copyOrderBtn = row.querySelector("[data-copy-wh-order]");
-        if (copyOrderBtn) {
-            copyOrderBtn.addEventListener("click", () => copyText(wh.public_order_id, "ID заказа скопирован"));
-        }
-        const copyPaymentBtn = row.querySelector("[data-copy-wh-payment]");
-        if (copyPaymentBtn) {
-            copyPaymentBtn.addEventListener("click", () => copyText(wh.payment_external_id, "ID платежа скопирован"));
-        }
-        const retryBtn = row.querySelector("[data-retry-wh]");
-        if (retryBtn) {
-            retryBtn.addEventListener("click", () => {
-                showConfirmModal({
-                    title: "Повторить обработку вебхука?",
-                    message: `Вебхук #${wh.id} (${wh.event_type || "событие"}) будет поставлен обратно в очередь обработки.`,
-                    confirmText: "Повторить",
-                    cancelText: "Отмена",
-                    onConfirm: async () => {
-                        const res = await api.retryWebhook(wh.id);
-                        showToast(res.message || "Вебхук поставлен в очередь");
-                        if (typeof reloadWebhooks === "function") await reloadWebhooks();
-                    },
-                });
-            });
-        }
-        const dismissBtn = row.querySelector("[data-dismiss-wh]");
-        if (dismissBtn) {
-            dismissBtn.addEventListener("click", () => {
-                showConfirmModal({
-                    title: "Скрыть проблемный вебхук?",
-                    message: `Вебхук #${wh.id} будет отмечен как обработанный и убран из списка проблемных. Действие запишется в аудит-лог.`,
-                    confirmText: "Скрыть",
-                    cancelText: "Отмена",
-                    isDestructive: true,
-                    onConfirm: async () => {
-                        const res = await api.dismissWebhook(wh.id);
-                        showToast(res.message || "Вебхук скрыт");
-                        if (typeof reloadWebhooks === "function") await reloadWebhooks();
-                    },
-                });
-            });
         }
         container.appendChild(row);
     });

@@ -233,7 +233,7 @@ export function renderAdminUsersView(root, state, onOpenUser) {
             updateDynamicSections(nextData);
         } catch (err) {
             if (!isStillActive(reqId)) return;
-            if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
+            if (err && err.code === "init_data_expired") return;
             showToast(err.message || "Не удалось загрузить пользователей", "error");
             pagerTopEl.innerHTML = "";
             pagerBottomEl.innerHTML = "";
