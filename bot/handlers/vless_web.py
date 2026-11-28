@@ -935,13 +935,7 @@ async def serve_unified_subscription_feed(
                     ):
                         ready_hubs.append(hub)
                 if ready_hubs:
-                    ready_hubs.sort(
-                        key=lambda s: (
-                            servers_repo.has_server_ingress_problem(s) or servers_repo.has_server_cdn_problem(s),
-                            servers_repo.get_server_load_score(s),
-                            int(s.id or 0),
-                        )
-                    )
+                    ready_hubs.sort(key=servers_repo.server_priority_sort_key)
                     cdn_label_mode = str(await get_system_setting(session, "bi_cdn_label_mode", "name") or "name")
                     cdn_yandex_label = str(await get_system_setting(session, "bi_cdn_yandex_label", "Yandex") or "Yandex")
                     cdn_turboflare_label = str(await get_system_setting(session, "bi_cdn_turboflare_label", "Turboflare") or "Turboflare")
@@ -963,46 +957,79 @@ async def serve_unified_subscription_feed(
                                 all_links.append(lk)
                 else:
                     all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING, "Нажмите ⟳ через 1 минуту"))
-                if is_new_device and device_client_uuid and is_bi_assigned:
-                    wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
-                    wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                    await session.flush()
-                    if wi_hubs:
+                sync_state = wi_sub.node_sync_state if isinstance(wi_sub.node_sync_state, dict) else {}
+                unsynced_hubs = []
+                for h in wi_hubs:
+                    if not (h.api_url and h.api_key):
+                        continue
+                    sync_entry = sync_state.get(str(h.id))
+                    is_unready = (
+                        not isinstance(sync_entry, dict)
+                        or sync_entry.get("active") is not True
+                        or (
+                            bool(h.xray_instance_epoch)
+                            and sync_entry.get("epoch") != h.xray_instance_epoch
+                        )
+                        or (sync_entry.get("version") or 0) <= 0
+                    )
+                    if is_unready:
+                        unsynced_hubs.append(h)
+                if device_client_uuid and is_bi_assigned and (is_new_device or unsynced_hubs):
+                    if is_new_device:
+                        wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
+                        wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                        await session.flush()
+                    target_hubs = (
+                        [h for h in wi_hubs if h.api_url and h.api_key]
+                        if is_new_device
+                        else unsynced_hubs
+                    )
+                    if target_hubs:
                         from services.xray_node_client import XrayNodeClient
 
                         targets_snapshot = [
                             (h.api_url, h.api_key, h.xray_instance_epoch)
-                            for h in wi_hubs
-                            if h.api_url and h.api_key
+                            for h in target_hubs
                         ]
                         ver_snap = int(wi_sub.desired_version or 1)
+                        sub_uuid_snap = str(wi_sub.uuid) if (not is_new_device and wi_sub.uuid) else None
 
                         async def _provision_new_wi_device(
                             targets: list[tuple[str, str, str | None]],
                             dev_uuid: str,
                             ver: int,
+                            sub_uuid_extra: str | None = None,
                         ) -> None:
+                            uuids_to_sync = [dev_uuid]
+                            if sub_uuid_extra and sub_uuid_extra != dev_uuid:
+                                uuids_to_sync.append(sub_uuid_extra)
                             async with XrayNodeClient(timeout=5.0) as client:
                                 for srv_url, srv_key, epoch in targets:
-                                    try:
-                                        await client.sync_client(
-                                            srv_url,
-                                            srv_key,
-                                            client_uuid=dev_uuid,
-                                            is_active=True,
-                                            version=ver,
-                                            expected_node_epoch=epoch,
-                                            service="white_internet",
-                                        )
-                                    except Exception as exc:
-                                        logger.warning("Background WI device provision failed for %s: %s", dev_uuid, exc)
+                                    for target_uuid in uuids_to_sync:
+                                        try:
+                                            await client.sync_client(
+                                                srv_url,
+                                                srv_key,
+                                                client_uuid=target_uuid,
+                                                is_active=True,
+                                                version=ver,
+                                                expected_node_epoch=epoch,
+                                                service="white_internet",
+                                            )
+                                        except Exception as exc:
+                                            logger.warning("Background WI device provision failed for %s: %s", target_uuid, exc)
 
                         if targets_snapshot and device_client_uuid:
                             from database.connection import queue_post_commit_task
 
                             queue_post_commit_task(
                                 session,
-                                lambda: _provision_new_wi_device(targets_snapshot, device_client_uuid, ver_snap),
+                                lambda: _provision_new_wi_device(
+                                    targets_snapshot,
+                                    device_client_uuid,
+                                    ver_snap,
+                                    sub_uuid_snap,
+                                ),
                             )
             elif not (is_bi_explicitly_disabled and std_active and is_std_assigned):
                 all_links.append(

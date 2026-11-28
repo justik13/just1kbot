@@ -242,6 +242,17 @@ CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
     "fp": WHITE_INTERNET_TLS_FINGERPRINT,
 }
 
+CANONICAL_XHTTP_TURBOFLARE_PROFILE: dict[str, Any] = {
+    **CANONICAL_XHTTP_PROFILE,
+    "uplinkHTTPMethod": "POST",
+    "uplinkDataPlacement": "body",
+    "uplinkDataKey": "",
+    "scMaxEachPostBytes": 65536,
+    "scMaxConcurrentPosts": 2,
+    "scMinPostsIntervalMs": 10,
+    "xPaddingPlacement": "header",
+}
+
 
 __all__ = [
     "API_CONCURRENCY_LIMIT",
@@ -250,6 +261,7 @@ __all__ = [
     "AccountLedgerEntryType",
     "AdminAuditAction",
     "CANONICAL_XHTTP_PROFILE",
+    "CANONICAL_XHTTP_TURBOFLARE_PROFILE",
     "DEFAULT_FALLBACK_BOT_USERNAME",
     "DEFAULT_VLESS_PROFILE_TITLE",
     "DEFAULT_WHITE_INTERNET_CHANNEL_URL",

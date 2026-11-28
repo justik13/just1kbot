@@ -117,6 +117,46 @@ async def count_active_user_devices(
     return int(await session.scalar(stmt) or 0)
 
 
+async def partition_bi_device_uuids_by_users(
+    session: AsyncSession,
+    wi_limit_by_user: dict[int, int],
+) -> tuple[dict[int, list[str]], dict[int, list[str]]]:
+    """Partition BI-eligible device UUIDs into (assigned_by_user, displaced_by_user)."""
+    user_ids = [int(uid) for uid in wi_limit_by_user]
+    assigned: dict[int, list[str]] = {}
+    displaced: dict[int, list[str]] = {}
+    if not user_ids:
+        return assigned, displaced
+
+    rows = (
+        await session.execute(
+            select(UserDevice.user_id, UserDevice.device_uuid)
+            .where(
+                UserDevice.user_id.in_(user_ids),
+                UserDevice.bi_priority >= 0,
+            )
+            .order_by(
+                UserDevice.user_id.asc(),
+                UserDevice.bi_priority.desc(),
+                UserDevice.first_seen_at.asc(),
+                UserDevice.id.asc(),
+            )
+        )
+    ).all()
+    for uid_val, dev_uuid in rows:
+        if not dev_uuid:
+            continue
+        uid_int = int(uid_val)
+        clean_uuid = str(dev_uuid).strip().lower()
+        cap = max(0, int(wi_limit_by_user.get(uid_int, 0) or 0))
+        bucket = assigned.setdefault(uid_int, [])
+        if len(bucket) < cap:
+            bucket.append(clean_uuid)
+        else:
+            displaced.setdefault(uid_int, []).append(clean_uuid)
+    return assigned, displaced
+
+
 async def register_user_device(
     session: AsyncSession,
     user_id: int,
@@ -407,6 +447,7 @@ __all__ = [
     "get_active_device_uuids",
     "get_user_device_by_hwid",
     "list_user_devices",
+    "partition_bi_device_uuids_by_users",
     "register_user_device",
     "set_device_bi_priority",
     "set_device_std_priority",

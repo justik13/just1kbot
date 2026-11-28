@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 import logging
+import time
+from typing import Any
 
 from aiogram import Bot
 from sqlalchemy import and_, func, or_, select
@@ -19,7 +21,7 @@ from config.enums import (
     WhiteInternetStatus,
 )
 from database.connection import session_scope
-from database.models import Server, User, UserDevice, WhiteInternetSubscription
+from database.models import Server, User, WhiteInternetSubscription
 from database.repositories import user_devices_repo, white_internet_repo
 from services.xray_node_client import SyncResult, XrayNodeClient
 from utils.datetime_helpers import now_utc
@@ -28,8 +30,19 @@ from utils.telegram import safe_send_message
 logger = logging.getLogger(__name__)
 
 RECONCILIATION_INTERVAL_SECONDS = 30.0
+INVENTORY_DRIFT_INTERVAL_SECONDS = 600.0
+FAILED_DRIFT_RETRY_SECONDS = 120.0
 BATCH_SIZE = 100
 DEFAULT_RECONCILIATION_CONCURRENCY = 5
+
+_NODE_WIDE_BATCH_FAILURE_PREFIXES = (
+    "Network failure:",
+    "Unexpected failure:",
+    "HTTP 5",
+    "Node epoch is unavailable",
+    "No managed Xray inbounds",
+    "Client store corrupted",
+)
 
 
 class WhiteInternetReconciliationWorker:
@@ -48,6 +61,30 @@ class WhiteInternetReconciliationWorker:
         self.max_concurrency = max_concurrency
         self._semaphore = asyncio.Semaphore(self.max_concurrency)
         self._sub_locks: dict[int, asyncio.Lock] = {}
+        self._last_drift_check_by_server: dict[int, tuple[float, str]] = {}
+        self._drift_fail_backoff: dict[int, tuple[float, str]] = {}
+
+    @staticmethod
+    def _get_inventory_entry(inv_ok: bool, inv_data: Any, client_uuid: str) -> dict | None:
+        """Look up a client UUID in /v1/clients/inventory response case-insensitively."""
+        if not inv_ok or not isinstance(inv_data, dict):
+            return None
+        inventory = inv_data.get("inventory")
+        if not isinstance(inventory, dict):
+            return None
+        target = str(client_uuid or "").strip().lower()
+        if not target:
+            return None
+        direct = inventory.get(client_uuid)
+        if isinstance(direct, dict):
+            return direct
+        direct_low = inventory.get(target)
+        if isinstance(direct_low, dict):
+            return direct_low
+        for k, v in inventory.items():
+            if str(k).strip().lower() == target and isinstance(v, dict):
+                return v
+        return None
 
     def _get_sub_lock(self, sub_id: int) -> asyncio.Lock:
         lock = self._sub_locks.get(sub_id)
@@ -132,6 +169,7 @@ class WhiteInternetReconciliationWorker:
         all_server_ids: set[int],
         sf,
         server_epochs: dict[int, str] | None = None,
+        bypass_idempotency: bool = False,
     ) -> bool:
         sub_id = task["sub_id"]
         sub_uuid = task["uuid"]
@@ -145,6 +183,11 @@ class WhiteInternetReconciliationWorker:
         async with self._get_sub_lock(sub_id):
             async with self._semaphore:
                 try:
+                    idempotency_key = (
+                        None
+                        if bypass_idempotency
+                        else f"reconcile:{sub_id}:{server_id}:{target_epoch}:{target_version}:{desired_active}"
+                    )
                     resp = await self.client.sync_client(
                         api_url,
                         api_key,
@@ -152,7 +195,7 @@ class WhiteInternetReconciliationWorker:
                         is_active=desired_active,
                         version=target_version,
                         expected_node_epoch=target_epoch,
-                        idempotency_key=f"reconcile:{sub_id}:{server_id}:{target_epoch}:{target_version}:{desired_active}",
+                        idempotency_key=idempotency_key,
                         service="white_internet",
                     )
 
@@ -192,11 +235,7 @@ class WhiteInternetReconciliationWorker:
                                     d_inv_ok, d_inv_data, _ = await self.client.get_inventory(
                                         api_url, api_key, client_ids=[d_uuid], service="white_internet"
                                     )
-                                    d_inv = (
-                                        (d_inv_data or {}).get("inventory", {}).get(d_uuid)
-                                        if d_inv_ok and isinstance(d_inv_data, dict)
-                                        else None
-                                    )
+                                    d_inv = self._get_inventory_entry(d_inv_ok, d_inv_data, d_uuid)
                                     expected_d_state = "active" if desired_active else "disabled"
                                     d_ver_inbounds = set(getattr(d_resp, "verified_inbounds", None) or [])
                                     d_ver_epoch = getattr(d_resp, "verified_epoch", None) or target_epoch
@@ -240,11 +279,7 @@ class WhiteInternetReconciliationWorker:
                                     disp_inv_ok, disp_inv_data, _ = await self.client.get_inventory(
                                         api_url, api_key, client_ids=[disp_uuid], service="white_internet"
                                     )
-                                    disp_inv = (
-                                        (disp_inv_data or {}).get("inventory", {}).get(disp_uuid)
-                                        if disp_inv_ok and isinstance(disp_inv_data, dict)
-                                        else None
-                                    )
+                                    disp_inv = self._get_inventory_entry(disp_inv_ok, disp_inv_data, disp_uuid)
                                     if not (
                                         disp_inv_ok
                                         and (disp_inv is None or disp_inv.get("observed_state") == "disabled")
@@ -355,52 +390,50 @@ class WhiteInternetReconciliationWorker:
                             return True
 
                         if sync_result == SyncResult.ALREADY_NEWER:
-                            client_inv = None
-                            if inv_ok and inv_data and "inventory" in inv_data:
-                                client_inv = inv_data["inventory"].get(sub_uuid)
-                                if client_inv:
-                                    observed_state = client_inv.get("observed_state")
-                                    expected_state = "active" if desired_active else "disabled"
-                                    inbounds_ok = not verified_inbounds or expected_inbound_tags.issubset(verified_inbounds)
-                                    epoch_ok = verified_epoch == target_epoch
-                                    if observed_state == expected_state and inbounds_ok and epoch_ok:
-                                        node_state = dict(sub.node_sync_state or {}) if isinstance(sub.node_sync_state, dict) else {}
-                                        node_state[str(server_id)] = {
-                                            "version": target_version,
-                                            "epoch": target_epoch,
-                                            "active": desired_active,
-                                            "synced_at": now_utc().isoformat(),
-                                        }
-                                        sub.node_sync_state = node_state
-                                        flag_modified(sub, "node_sync_state")
+                            client_inv = self._get_inventory_entry(inv_ok, inv_data, sub_uuid)
+                            if client_inv:
+                                observed_state = client_inv.get("observed_state")
+                                expected_state = "active" if desired_active else "disabled"
+                                inbounds_ok = not verified_inbounds or expected_inbound_tags.issubset(verified_inbounds)
+                                epoch_ok = verified_epoch == target_epoch
+                                if observed_state == expected_state and inbounds_ok and epoch_ok:
+                                    node_state = dict(sub.node_sync_state or {}) if isinstance(sub.node_sync_state, dict) else {}
+                                    node_state[str(server_id)] = {
+                                        "version": target_version,
+                                        "epoch": target_epoch,
+                                        "active": desired_active,
+                                        "synced_at": now_utc().isoformat(),
+                                    }
+                                    sub.node_sync_state = node_state
+                                    flag_modified(sub, "node_sync_state")
 
-                                        all_synced = all(
-                                            (node_state.get(str(sid)) or {}).get("version") == sub.desired_version
-                                            and (node_state.get(str(sid)) or {}).get("epoch")
-                                            == (
-                                                server_epochs[sid]
-                                                if server_epochs and sid in server_epochs
-                                                else target_epoch
-                                            )
-                                            and (node_state.get(str(sid)) or {}).get("active") is desired_active
-                                            for sid in all_server_ids
+                                    all_synced = all(
+                                        (node_state.get(str(sid)) or {}).get("version") == sub.desired_version
+                                        and (node_state.get(str(sid)) or {}).get("epoch")
+                                        == (
+                                            server_epochs[sid]
+                                            if server_epochs and sid in server_epochs
+                                            else target_epoch
                                         )
-                                        if all_synced:
-                                            sub.actual_version = max(sub.actual_version or 0, target_version)
-                                            sub.provisioning_status = (
-                                                WhiteInternetProvisioningStatus.ACTIVE
-                                                if desired_active
-                                                else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
-                                            )
-                                            sub.last_sync_error = None
-                                            if sub.status == WhiteInternetStatus.PENDING and desired_active:
-                                                sub.status = WhiteInternetStatus.ACTIVE
-                                                sub.status_reason = None
-                                                notify_user_id = sub.user_id
+                                        and (node_state.get(str(sid)) or {}).get("active") is desired_active
+                                        for sid in all_server_ids
+                                    )
+                                    if all_synced:
+                                        sub.actual_version = max(sub.actual_version or 0, target_version)
+                                        sub.provisioning_status = (
+                                            WhiteInternetProvisioningStatus.ACTIVE
+                                            if desired_active
+                                            else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
+                                        )
+                                        sub.last_sync_error = None
+                                        if sub.status == WhiteInternetStatus.PENDING and desired_active:
+                                            sub.status = WhiteInternetStatus.ACTIVE
+                                            sub.status_reason = None
+                                            notify_user_id = sub.user_id
 
-                                        sub.last_synced_at = now_utc()
-                                        await lock_session.commit()
-                                        return True
+                                    sub.last_synced_at = now_utc()
+                                    await lock_session.commit()
+                                    return True
 
                             node_ver = (getattr(resp, "raw_data", None) or {}).get("version") or (
                                 (client_inv or {}).get("version")
@@ -460,22 +493,20 @@ class WhiteInternetReconciliationWorker:
                 .limit(BATCH_SIZE)
             )
             subs = (await sess.execute(stmt)).scalars().all()
-            sub_user_ids = list({s.user_id for s in subs if getattr(s, "user_id", None) is not None})
-            active_devs_by_user: dict[int, set[str]] = {}
-            if sub_user_ids:
-                dev_rows = (
-                    await sess.execute(
-                        select(UserDevice.user_id, UserDevice.device_uuid).where(
-                            UserDevice.user_id.in_(sub_user_ids),
-                            UserDevice.is_wi_assigned.is_(True),
-                        )
-                    )
-                ).all()
-                for uid_val, dev_uuid in dev_rows:
-                    if dev_uuid:
-                        active_devs_by_user.setdefault(int(uid_val), set()).add(
-                            str(dev_uuid).strip().lower()
-                        )
+            wi_limit_by_user: dict[int, int] = {}
+            for s in subs:
+                uid_val = getattr(s, "user_id", None)
+                if uid_val is None:
+                    continue
+                if s.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE):
+                    lim = max(1, int(getattr(s, "device_limit", 1) or 1))
+                    wi_limit_by_user[int(uid_val)] = max(wi_limit_by_user.get(int(uid_val), 0), lim)
+            assigned_devs_by_user, _ = await user_devices_repo.partition_bi_device_uuids_by_users(
+                sess, wi_limit_by_user
+            )
+            active_devs_by_user = {
+                uid_int: set(uuids) for uid_int, uuids in assigned_devs_by_user.items()
+            }
             work = [
                 (
                     s.id,
@@ -535,11 +566,7 @@ class WhiteInternetReconciliationWorker:
                                 inv_ok, inv_data, _ = await self.client.get_inventory(
                                     api_url, api_key, client_ids=[old_uuid], service="white_internet"
                                 )
-                                client_inv = (
-                                    (inv_data or {}).get("inventory", {}).get(old_uuid)
-                                    if inv_ok and isinstance(inv_data, dict)
-                                    else None
-                                )
+                                client_inv = self._get_inventory_entry(inv_ok, inv_data, old_uuid)
                                 if inv_ok and (client_inv is None or client_inv.get("observed_state") == "disabled"):
                                     results.append(True)
                                 else:
@@ -696,23 +723,20 @@ class WhiteInternetReconciliationWorker:
             urgent_rows = (await sess.execute(stmt_urgent)).all()
             seen_sub_ids = {sub.id for sub, _, _ in urgent_rows}
 
-            remaining_limit = max(0, BATCH_SIZE - len(urgent_rows))
-            active_rows = []
-            if remaining_limit > 0:
-                stmt_active = (
-                    select(WhiteInternetSubscription, User.financial_hold, User.is_deleted)
-                    .join(User, User.id == WhiteInternetSubscription.user_id)
-                    .where(WhiteInternetSubscription.status == WhiteInternetStatus.ACTIVE)
+            stmt_active = (
+                select(WhiteInternetSubscription, User.financial_hold, User.is_deleted)
+                .join(User, User.id == WhiteInternetSubscription.user_id)
+                .where(WhiteInternetSubscription.status == WhiteInternetStatus.ACTIVE)
+            )
+            if seen_sub_ids:
+                stmt_active = stmt_active.where(
+                    WhiteInternetSubscription.id.not_in(seen_sub_ids)
                 )
-                if seen_sub_ids:
-                    stmt_active = stmt_active.where(
-                        WhiteInternetSubscription.id.not_in(seen_sub_ids)
-                    )
-                stmt_active = stmt_active.order_by(
-                    WhiteInternetSubscription.last_synced_at.asc().nullsfirst(),
-                    WhiteInternetSubscription.id.asc(),
-                ).limit(remaining_limit)
-                active_rows = (await sess.execute(stmt_active)).all()
+            stmt_active = stmt_active.order_by(
+                WhiteInternetSubscription.last_synced_at.asc().nullsfirst(),
+                WhiteInternetSubscription.id.asc(),
+            )
+            active_rows = (await sess.execute(stmt_active)).all()
 
             subs_with_flags = [*urgent_rows, *active_rows]
 
@@ -744,8 +768,10 @@ class WhiteInternetReconciliationWorker:
                 })
 
         synced_count = 0
+        reconciled_pairs: set[tuple[int, int]] = set()
         for server_id, api_url, api_key, target_epoch, xhttp_locs in active_server_targets:
             per_server_tasks = []
+            pending_pairs: list[tuple[int, int]] = []
             is_decommissioning = server_id in decommissioning_server_ids
             for task in sub_tasks:
                 if is_decommissioning and task["desired_active"]:
@@ -758,6 +784,7 @@ class WhiteInternetReconciliationWorker:
                     or n_state.get("active") is not task["desired_active"]
                     or task["actual_version"] != task["target_version"]
                 ):
+                    pending_pairs.append((task["sub_id"], server_id))
                     per_server_tasks.append(
                         self._reconcile_sub_on_server(
                             server_id,
@@ -773,18 +800,357 @@ class WhiteInternetReconciliationWorker:
                     )
             if per_server_tasks:
                 results = await asyncio.gather(*per_server_tasks, return_exceptions=True)
-                for r in results:
+                for (done_sub_id, done_server_id), r in zip(pending_pairs, results, strict=True):
                     if isinstance(r, Exception):
                         logger.error("Error in WI reconciliation task: %s", r, exc_info=r)
                     elif r is True:
+                        reconciled_pairs.add((done_sub_id, done_server_id))
                         synced_count += 1
 
+        non_decom_epochs = {
+            t[0]: t[3] for t in active_server_targets if t[0] not in decommissioning_server_ids
+        }
+        now_mono = time.monotonic()
+        due_server_ids: set[int] = set()
+        for sid, ep in non_decom_epochs.items():
+            backoff = self._drift_fail_backoff.get(sid)
+            if backoff is not None and backoff[1] == ep and now_mono < backoff[0]:
+                continue
+            last_ok = self._last_drift_check_by_server.get(sid)
+            if (
+                last_ok is None
+                or last_ok[1] != ep
+                or (now_mono - last_ok[0]) >= INVENTORY_DRIFT_INTERVAL_SECONDS
+            ):
+                due_server_ids.add(sid)
+
+        if due_server_ids:
+            synced_count += await self._reconcile_inventory_drift(
+                active_server_targets,
+                decommissioning_server_ids,
+                active_only_server_ids,
+                server_epochs,
+                sf,
+                reconciled_pairs=reconciled_pairs,
+                target_server_ids=due_server_ids,
+            )
         synced_count += await self._reconcile_pending_revocations(
             active_server_targets,
             sf,
             expected_hub_count=total_active_wi_hubs,
         )
         return synced_count
+
+    async def _collect_active_wi_inventory_truth(
+        self,
+        sf,
+        sub_ids: set[int] | None = None,
+    ) -> tuple[dict[int, dict], dict[str, int]]:
+        """Return (sub_tasks_by_id, expected_active_uuid -> sub_id) from DB."""
+        if sub_ids is not None and not sub_ids:
+            return {}, {}
+        now = now_utc()
+        async with sf() as sess:
+            stmt = (
+                select(WhiteInternetSubscription)
+                .join(User, User.id == WhiteInternetSubscription.user_id)
+                .where(
+                    WhiteInternetSubscription.status.in_([
+                        WhiteInternetStatus.PENDING,
+                        WhiteInternetStatus.ACTIVE,
+                    ]),
+                    or_(
+                        WhiteInternetSubscription.expires_at.is_(None),
+                        WhiteInternetSubscription.expires_at > now,
+                    ),
+                    User.financial_hold.is_(False),
+                    User.is_deleted.is_(False),
+                )
+            )
+            if sub_ids is not None:
+                stmt = stmt.where(WhiteInternetSubscription.id.in_(sorted(sub_ids)))
+            stmt = stmt.order_by(WhiteInternetSubscription.id.asc())
+            active_rows = (await sess.execute(stmt)).scalars().all()
+            wi_limit_by_user: dict[int, int] = {}
+            for sub in active_rows:
+                uid_val = getattr(sub, "user_id", None)
+                if uid_val is None:
+                    continue
+                lim = max(1, int(getattr(sub, "device_limit", 1) or 1))
+                wi_limit_by_user[int(uid_val)] = max(wi_limit_by_user.get(int(uid_val), 0), lim)
+            devs_by_user, _ = await user_devices_repo.partition_bi_device_uuids_by_users(
+                sess, wi_limit_by_user
+            )
+
+        tasks_by_sub_id: dict[int, dict] = {}
+        expected_uuid_to_sub_id: dict[str, int] = {}
+        for sub in active_rows:
+            dev_limit = max(1, int(getattr(sub, "device_limit", 1) or 1))
+            tasks_by_sub_id[sub.id] = {
+                "sub_id": sub.id,
+                "user_id": sub.user_id,
+                "uuid": sub.uuid,
+                "device_limit": dev_limit,
+                "desired_active": True,
+                "target_version": sub.desired_version,
+                "node_sync_state": dict(sub.node_sync_state or {}) if isinstance(sub.node_sync_state, dict) else {},
+                "actual_version": sub.actual_version,
+            }
+            if sub.uuid:
+                expected_uuid_to_sub_id[str(sub.uuid).strip().lower()] = sub.id
+            for d_uuid in devs_by_user.get(int(sub.user_id), [])[:dev_limit]:
+                expected_uuid_to_sub_id[str(d_uuid).strip().lower()] = sub.id
+        return tasks_by_sub_id, expected_uuid_to_sub_id
+
+    async def _disable_stale_uuids_on_server(
+        self,
+        server_id: int,
+        api_url: str,
+        api_key: str,
+        target_epoch: str,
+        stale_uuids: list[str],
+        inv_versions_by_uuid: dict[str, int],
+        sf,
+    ) -> int:
+        """Disable stale active WI UUIDs with safe monotonic versioning and epoch/node failure guards."""
+        version_by_uuid: dict[str, int] = {
+            u: (inv_versions_by_uuid[u] + 1) if inv_versions_by_uuid.get(u, 0) > 0 else 2
+            for u in stale_uuids
+        }
+
+        batch_payload = [
+            {
+                "uuid": u,
+                "is_active": False,
+                "desired_state": "disabled",
+                "version": version_by_uuid[u],
+                "expected_node_epoch": target_epoch,
+                "service": "white_internet",
+            }
+            for u in stale_uuids
+        ]
+        batch_supported, batch_succeeded, batch_failed = await self.client.batch_sync_clients(
+            api_url, api_key, batch_payload
+        )
+        healed = 0
+        fallback_stale: list[str]
+        if batch_supported:
+            healed += len(batch_succeeded)
+            if batch_failed:
+                if not batch_succeeded and all(
+                    err.startswith(_NODE_WIDE_BATCH_FAILURE_PREFIXES) for err in batch_failed.values()
+                ):
+                    logger.warning(
+                        "Aborting WI stale cleanup on server %d due to node-wide batch failure: %s",
+                        server_id,
+                        next(iter(batch_failed.values())),
+                    )
+                    return healed
+                if any(
+                    ("fenced" in err.lower() or "epoch" in err.lower())
+                    and not err.startswith("Node epoch is unavailable")
+                    for err in batch_failed.values()
+                ):
+                    await self._refresh_server_epoch(server_id, api_url, api_key, sf)
+                    return healed
+            fallback_stale = [u for u in stale_uuids if u in batch_failed]
+        else:
+            fallback_stale = list(stale_uuids)
+
+        for stale_uuid in fallback_stale:
+            try:
+                send_ver = version_by_uuid.get(stale_uuid, 2)
+
+                async with self._semaphore:
+                    resp = await self.client.sync_client(
+                        api_url,
+                        api_key,
+                        stale_uuid,
+                        is_active=False,
+                        version=send_ver,
+                        expected_node_epoch=target_epoch,
+                        service="white_internet",
+                    )
+                    res = resp.result if hasattr(resp, "result") else resp[0]
+                    if res == SyncResult.FENCED:
+                        await self._refresh_server_epoch(server_id, api_url, api_key, sf)
+                        break
+                    if res == SyncResult.ALREADY_NEWER:
+                        raw_data = getattr(resp, "raw_data", None) or {}
+                        raw_state = raw_data.get("state")
+                        if raw_state == "disabled" and raw_data.get("all_inbounds_verified") is True:
+                            res = SyncResult.APPLIED
+                        else:
+                            raw_v = raw_data.get("version")
+                            if not isinstance(raw_v, int):
+                                st_inv_ok, st_inv_data, _ = await self.client.get_inventory(
+                                    api_url, api_key, client_ids=[stale_uuid], service="white_internet"
+                                )
+                                st_inv = self._get_inventory_entry(st_inv_ok, st_inv_data, stale_uuid)
+                                if st_inv_ok and (st_inv is None or st_inv.get("observed_state") == "disabled"):
+                                    res = SyncResult.APPLIED
+                                else:
+                                    raw_v = (st_inv or {}).get("version")
+                            if res != SyncResult.APPLIED:
+                                retry_ver = max(send_ver, int(raw_v) if isinstance(raw_v, int) else send_ver) + 1
+                                retry_resp = await self.client.sync_client(
+                                    api_url,
+                                    api_key,
+                                    stale_uuid,
+                                    is_active=False,
+                                    version=retry_ver,
+                                    expected_node_epoch=target_epoch,
+                                    service="white_internet",
+                                )
+                                res = retry_resp.result if hasattr(retry_resp, "result") else retry_resp[0]
+                                if res == SyncResult.FENCED:
+                                    await self._refresh_server_epoch(server_id, api_url, api_key, sf)
+                                    break
+                    if res == SyncResult.APPLIED:
+                        healed += 1
+            except Exception as exc:
+                logger.warning(
+                    "Failed disabling stale WI UUID %s on server %d: %s",
+                    stale_uuid[:8],
+                    server_id,
+                    exc,
+                )
+
+        return healed
+
+    async def _reconcile_inventory_drift(
+        self,
+        active_server_targets: list[tuple[int, str, str, str, list]],
+        decommissioning_server_ids: set[int],
+        active_only_server_ids: set[int],
+        server_epochs: dict[int, str],
+        sf,
+        *,
+        reconciled_pairs: set[tuple[int, int]] | None = None,
+        target_server_ids: set[int] | None = None,
+    ) -> int:
+        """Detect missing active WI UUIDs and stale node-side WI UUIDs across active ru_hubs."""
+        non_decom_targets = [t for t in active_server_targets if t[0] not in decommissioning_server_ids]
+        if not non_decom_targets:
+            return 0
+        due_targets = (
+            [t for t in non_decom_targets if t[0] in target_server_ids]
+            if target_server_ids is not None
+            else non_decom_targets
+        )
+        if not due_targets:
+            return 0
+
+        _, expected_uuid_to_sub_id = await self._collect_active_wi_inventory_truth(sf)
+        expected_active_uuids = set(expected_uuid_to_sub_id.keys())
+        seen_pairs = reconciled_pairs or set()
+        healed_count = 0
+
+        for server_id, api_url, api_key, target_epoch, xhttp_locs in due_targets:
+            try:
+                inv_ok, inv_data, inv_err = await self.client.get_inventory(
+                    api_url, api_key, service="white_internet"
+                )
+            except Exception as exc:
+                logger.debug("WI inventory drift check skipped for server %d: %s", server_id, exc)
+                self._drift_fail_backoff[server_id] = (time.monotonic() + FAILED_DRIFT_RETRY_SECONDS, target_epoch)
+                continue
+            if not inv_ok or not isinstance(inv_data, dict) or not isinstance(inv_data.get("inventory"), dict):
+                if inv_err:
+                    logger.debug("WI inventory drift check failed on server %d: %s", server_id, inv_err)
+                self._drift_fail_backoff[server_id] = (time.monotonic() + FAILED_DRIFT_RETRY_SECONDS, target_epoch)
+                continue
+
+            self._last_drift_check_by_server[server_id] = (time.monotonic(), target_epoch)
+            self._drift_fail_backoff.pop(server_id, None)
+
+            inventory = inv_data["inventory"]
+            expected_inbounds = self._expected_inbound_tags(xhttp_locs)
+            node_active_uuids: set[str] = set()
+            node_healthy_uuids: set[str] = set()
+            inv_versions_by_uuid: dict[str, int] = {}
+            for raw_cid, info in inventory.items():
+                if not isinstance(info, dict):
+                    continue
+                cid = str(raw_cid).strip().lower()
+                raw_info_ver = info.get("version")
+                if isinstance(raw_info_ver, int) and not isinstance(raw_info_ver, bool):
+                    inv_versions_by_uuid[cid] = raw_info_ver
+                obs = info.get("observed_state")
+                if obs in ("active", "partial"):
+                    node_active_uuids.add(cid)
+                inb_map = info.get("inbounds") or {}
+                present_tags = {tag for tag, present in inb_map.items() if present} if isinstance(inb_map, dict) else set()
+                inbounds_ok = not expected_inbounds or expected_inbounds.issubset(present_tags)
+                if obs == "active" and info.get("all_inbounds_matched", True) is not False and inbounds_ok:
+                    node_healthy_uuids.add(cid)
+
+            missing_uuids = expected_active_uuids - node_healthy_uuids
+            candidate_missing_sub_ids = {
+                expected_uuid_to_sub_id[u]
+                for u in missing_uuids
+                if (expected_uuid_to_sub_id[u], server_id) not in seen_pairs
+            }
+            if candidate_missing_sub_ids:
+                # Re-verify live DB status/version immediately before repairing to avoid re-activating freshly disabled subs.
+                live_tasks_by_sub_id, _ = await self._collect_active_wi_inventory_truth(
+                    sf, sub_ids=candidate_missing_sub_ids
+                )
+                live_missing_sub_ids = sorted(
+                    sid_sub for sid_sub in candidate_missing_sub_ids if sid_sub in live_tasks_by_sub_id
+                )
+                if live_missing_sub_ids:
+                    logger.info(
+                        "Detected %d WI missing/partial UUIDs (%d live subs) on server %d; resyncing.",
+                        len(missing_uuids),
+                        len(live_missing_sub_ids),
+                        server_id,
+                    )
+                    repair_tasks = [
+                        self._reconcile_sub_on_server(
+                            server_id,
+                            api_url,
+                            api_key,
+                            target_epoch,
+                            xhttp_locs,
+                            live_tasks_by_sub_id[sid_sub],
+                            active_only_server_ids,
+                            sf,
+                            server_epochs=server_epochs,
+                            bypass_idempotency=True,
+                        )
+                        for sid_sub in live_missing_sub_ids
+                    ]
+                    repair_results = await asyncio.gather(*repair_tasks, return_exceptions=True)
+                    for res in repair_results:
+                        if isinstance(res, Exception):
+                            logger.error("Error repairing missing WI inventory on server %d: %s", server_id, res, exc_info=res)
+                        elif res is True:
+                            healed_count += 1
+
+            candidate_stale = sorted(node_active_uuids - expected_active_uuids)
+            if candidate_stale:
+                # Refresh active inventory truth per server right after get_inventory to close cross-hub TOCTOU.
+                _, fresh_map = await self._collect_active_wi_inventory_truth(sf)
+                confirmed_expected_uuids = set(fresh_map.keys())
+                stale_uuids = [u for u in candidate_stale if u not in confirmed_expected_uuids]
+                if stale_uuids:
+                    logger.info(
+                        "Disabling %d stale active WI UUIDs on server %d.",
+                        len(stale_uuids),
+                        server_id,
+                    )
+                    healed_count += await self._disable_stale_uuids_on_server(
+                        server_id,
+                        api_url,
+                        api_key,
+                        target_epoch,
+                        stale_uuids,
+                        inv_versions_by_uuid,
+                        sf,
+                    )
+
+        return healed_count
 
 
 async def white_internet_reconciliation_loop(
