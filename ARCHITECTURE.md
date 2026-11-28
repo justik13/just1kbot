@@ -15,8 +15,8 @@
   - профиль `nodes`: локальный dev-запуск нод из соседнего `../just1knode` (`DEV_NODE_API_KEY`).
 - **Управляющие и сервисные скрипты (`scripts/`):**
   - `scripts/setup.sh` — первичная установка и настройка хоста (включая `vm.overcommit_memory=1`);
-  - `scripts/cli.sh` — CLI `just1kbot` (`status`, `version`, `logs`, `update` с двухфазным `_update-post`, `preflight`, `backup`, `gdrive`, `restore`, `restart`, `start`, `stop`, `config`, `doctor`, `uninstall`);
-  - `scripts/audit_invariants.py` — проверка 12 доменных/финансовых/БД-инвариантов;
+  - `scripts/cli.sh` — CLI `just1kbot`: жизненный цикл (`start`, `stop`, `restart`, `status`, `logs`, `version`), обслуживание и деплой (`update` с двухфазным `_update-post`, `preflight`, `config`, `doctor`, `uninstall`), бэкапы (`backup`, `gdrive`, `restore`);
+  - `scripts/audit_invariants.py` — проверка доменных, финансовых и БД-инвариантов;
   - `scripts/reencrypt_database.py` — поэтапная перешифровка БД при ротации `DB_ENCRYPTION_KEY`;
   - `scripts/audit_stop_words.py` — статическая проверка комплаенса пользовательских текстов и шаблонов.
 
@@ -47,7 +47,7 @@
 ### Mini App и JSON API
 - Регистрация маршрутов: `bot/handlers/webhook.py` → `bot/miniapp/routes.py`.
 - Оболочка: `GET /app`, `/app/`, `/app/assets/{asset_path}` (включая виртуальные пути `guides_data.json` и `guides/*`).
-- Авторизация (`bot/miniapp/auth.py`, `services/miniapp_auth_service.py`): проверка HMAC-SHA256 подписи Telegram `initData` по `BOT_TOKEN` из заголовков `X-Telegram-Init-Data` или `Authorization` (`tma`/`bearer`), TTL 24 ч, допустимый сдвиг в будущее 5 мин; истёкшая подпись возвращает `401` с `code: "init_data_expired"`. Админ-маршруты дополнительно проверяют `ctx.is_admin` (`ADMIN_IDS`).
+- Авторизация (`bot/miniapp/auth.py`, `services/miniapp_auth_service.py`): проверка HMAC-SHA256 подписи Telegram `initData` по `BOT_TOKEN` из заголовков `X-Telegram-Init-Data` или `Authorization` (`tma`/`bearer`) с проверкой TTL; истёкшая подпись возвращает `401` с `code: "init_data_expired"`. Админ-маршруты дополнительно проверяют `ctx.is_admin` (`ADMIN_IDS`).
 - Пользовательский API (`/api/app/me`, `/api/app/user/*`): дашборд, котировка/покупка/даунгрейд Standard, покупка/продление/доп. слот/докупка ГБ/даунгрейд White Internet, пополнение баланса, ручная проверка статуса заказа, автопродление, удаление/сброс/приоритеты HWID-устройств.
 - Админский API (`/api/app/admin/*`): обзор, CRUD/refresh/toggle/lifecycle нод, глобальные INCY-настройки, поиск/карточка/корректировка/DM/ротация токенов/сброс устройств пользователей, превью/запуск/отмена рассылок, массовые бонусы и продления, финансы и подтверждение ручной проверки заказов, переключатель maintenance платежей, аудит-логи.
 
@@ -56,13 +56,13 @@
   - маршруты: `GET /sub/{token}`, `/sub/access/{token}`, `/sub/vless/{token}`, `GET {WHITE_INTERNET_SUB_PATH_PREFIX}/{token}` (по умолчанию `/sub/wl/{token}`), `GET {prefix}/ping`, `GET /sub/assets/happ_guide.mp4`, `POST .../{token}/report` (экстренное обращение в поддержку с алертом админам в Telegram).
 - Логика ответа:
   1. Поиск токена в `vless_subscriptions` и `white_internet_subscriptions` (кросс-фолбэк для единой ссылки).
-  2. Если нет `X-Hwid`/`X-Device-Hwid`/`X-Device-Id`: браузер получает HTML-лендинг (`bot/templates/vless_landing/` или `vless_landing_status.html` с 5с автообновлением для WI `PENDING`), не-браузер — `403` с `x-hwid-required: true`.
-  3. С валидным HWID выполняется регистрация в `user_devices` (`user_devices_repo.register_user_device`) с проверкой общего лимита и 24ч churn-лимита; при превышении возвращается stub-фид со статус-заголовками лимита.
-  4. Собирается Base64-фид: активные ссылки Standard (`generate_vless_links`, выбор `ru_hub` консистентным хэшем по UUID с учётом ingress-здоровья и нагрузки `<85%`) + White Internet (`generate_bi_xhttp_links` только по `ru_hub`, синхронизированным на текущую эпоху Xray) либо inline-заглушки (`127.0.0.1:443`) при pending/лимите/исчерпании. Передаются заголовки INCY/Happ (`Subscription-Userinfo`, `Profile-Title`, `Announce`, `Device-Limit`, `Device-Active-Count`, `Profile-Update-Interval`, `Routing`, DoH-параметры).
+  2. Если нет `X-Hwid`/`X-Device-Hwid`/`X-Device-Id`: браузер получает HTML-лендинг (`bot/templates/vless_landing/` или `vless_landing_status.html` с автообновлением для WI `PENDING`), не-браузер — `403` с `x-hwid-required: true`.
+  3. С валидным HWID выполняется регистрация в `user_devices` (`user_devices_repo.register_user_device`) с проверкой общего лимита и суточного churn-лимита; при превышении возвращается stub-фид со статус-заголовками лимита.
+  4. Собирается Base64-фид: активные ссылки Standard (`generate_vless_links`, выбор `ru_hub` консистентным хэшем по UUID с учётом ingress-здоровья и нагрузки) + White Internet (`generate_bi_xhttp_links` только по `ru_hub`, синхронизированным на текущую эпоху Xray) либо inline-заглушки (`127.0.0.1:443`) при pending/лимите/исчерпании. Передаются заголовки INCY/Happ (`Subscription-Userinfo`, `Profile-Title`, `Announce`, `Device-Limit`, `Device-Active-Count`, `Profile-Update-Interval`, `Routing`, DoH-параметры).
 
 ### Платежи, вебхуки и `/health`
 - Вход: `POST /webhook/yookassa`, `POST /yookassa/webhook`, `GET /health` (`bot/handlers/webhook.py`).
-- `GET /health`: 5-секундный in-memory кэш под single-flight lock; проверяет PostgreSQL (`SELECT 1`), Redis (`ping`) и `JUST1KBOT_HEARTBEAT_FILE` (`STOPPED` или возраст `>180` с → `503`).
+- `GET /health`: короткий in-memory кэш под single-flight lock; проверяет PostgreSQL (`SELECT 1`), Redis (`ping`) и свежесть `JUST1KBOT_HEARTBEAT_FILE` (при `STOPPED` или устаревании → `503`).
 - Проверка источника вебхуков: `Caddyfile` (`remote_ip`) + проверка в приложении по `YOOKASSA_IP_RANGES` + `YOOKASSA_EXTRA_IPS` через `get_trusted_client_ip`.
 - Идемпотентность: канонический SHA-256 `event_key` в `webhook_inbox` с `SELECT ... FOR UPDATE`; поддерживаются события `payment.waiting_for_capture`, `payment.succeeded`, `payment.canceled`, `refund.succeeded`.
 - Обработка (`services/order_service.py`, `services/fulfillment_service.py`, `services/referral_bonus.py`):
@@ -73,28 +73,28 @@
   - если заказ ещё не найден при приходе вебхука, строка `webhook_inbox` остаётся `pending`, а хендлер отвечает `503` (чтобы ЮKassa повторила доставку), также её подхватывает `cleanup`-воркер.
 
 ### Фоновые воркеры (`services/workers/__init__.py`)
-Супервизор управляет 7 воркерами с экспоненциальным backoff (неблокирующим, по timestamp), 15-минутным cooldown для некритичных воркеров и Telegram-алертами админам:
-1. `traffic` (`traffic.py`, 60 с) — забирает `/v1/traffic/snapshot`, начисляет дельты Standard/WI, отслеживает 90% и исчерпание квоты WI, шлёт админ-алерт при `>1 ТБ/мес` на пользователя.
-2. `cleanup` (`cleanup.py`, 60 с / 1 ч / 24 ч) — сверяет зависшие `pending`-заказы в ЮKassa и `pending`-вебхуки; раз в час отключает истёкший VLESS (после `VPN_ACCESS_GRACE_HOURS = 4`) и `financial_hold`, докручивает `pending_revoked_uuids`, рассинхронизированные VLESS-подписки и дрейф эпох VLESS-серверов (`vless_synced_epoch != xray_instance_epoch` → `sync_all_active_to_server`), применяет отложенные WI-даунгрейды; раз в сутки чистит `audit_logs` (`>180 дн.`), `webhook_inbox` (`>30 дн.`) и старые `device_registration_events`.
-3. `notifications` (`notifications.py`, 30 мин) — автопродление Standard/WI и уведомления за 3д/1д/2ч/истёк.
-4. `credit_notifications` (`credit_notifications.py`, 5 мин) — доотправка отложенных пушей о зачислении и реферальном бонусе (`Order.metadata_`).
-5. `heartbeat` (`heartbeat.py`, 60 с) — атомарно обновляет `JUST1KBOT_HEARTBEAT_FILE`, проверяемый в `GET /health`.
-6. `node_monitor` (`node_monitor.py`, 60 с, параллельность до 6 нод) — опрашивает `/v1/health` и `/v1/node/status`, ведёт персистентный автомат `ONLINE` → `WAITING_CONFIRMATION` (60 с) → `PROBLEM` → `ONLINE` (3 успеха) / `MANUAL_DISABLED`, контролирует диск (`>85%`), SSL, лимит трафика хостинга (80% warn / auto-disable), синтетические ingress/CDN/bridge-зонды (с автоисключением сбойных `eu_hub` через `blocked_eu_ids`) и запускает ресинк топологии.
-7. `white_internet_reconciliation` (`white_internet_reconciliation.py`, 30 с, `critical=True`) — приводит состояние WI-подписок и `device_uuid` к целевому на всех активных WI `ru_hub`, раз в 10 мин проводит inventory drift check (восстанавливает пропавшие и отключает «лишние» UUID).
+Супервизор управляет 7 воркерами с неблокирующим экспоненциальным backoff, cooldown для некритичных воркеров и Telegram-алертами админам:
+1. `traffic` (`traffic.py`) — забирает `/v1/traffic/snapshot`, начисляет дельты Standard/WI, отслеживает порог предупреждения и исчерпание квоты WI, шлёт админ-алерт при аномальном месячном трафике.
+2. `cleanup` (`cleanup.py`) — сверяет зависшие `pending`-заказы в ЮKassa и `pending`-вебхуки; отключает истёкший VLESS (после `VPN_ACCESS_GRACE_HOURS`) и `financial_hold`, докручивает `pending_revoked_uuids`, рассинхронизированные VLESS-подписки и дрейф эпох VLESS-серверов (`vless_synced_epoch != xray_instance_epoch` → `sync_all_active_to_server`), применяет отложенные WI-даунгрейды; чистит устаревшие `audit_logs`, `webhook_inbox` и `device_registration_events`.
+3. `notifications` (`notifications.py`) — автопродление Standard/WI и уведомления об истечении.
+4. `credit_notifications` (`credit_notifications.py`) — доотправка отложенных пушей о зачислении и реферальном бонусе (`Order.metadata_`).
+5. `heartbeat` (`heartbeat.py`) — атомарно обновляет `JUST1KBOT_HEARTBEAT_FILE`, проверяемый в `GET /health`.
+6. `node_monitor` (`node_monitor.py`) — параллельно опрашивает `/v1/health` и `/v1/node/status`, ведёт персистентный автомат `ONLINE` → `WAITING_CONFIRMATION` → `PROBLEM` → `ONLINE` / `MANUAL_DISABLED`, контролирует диск, SSL, лимит трафика хостинга, синтетические ingress/CDN/bridge-зонды (с автоисключением сбойных `eu_hub` через `blocked_eu_ids`) и запускает ресинк топологии.
+7. `white_internet_reconciliation` (`white_internet_reconciliation.py`, `critical=True`) — приводит состояние WI-подписок и `device_uuid` к целевому на всех активных WI `ru_hub`, периодически проводит inventory drift check (восстанавливает пропавшие и отключает «лишние» UUID).
 
 ### Контракт взаимодействия `just1kbot` ↔ `just1knode`
 Клиент — `services/xray_node_client.py` (`XrayNodeClient`), оркестратор топологии — `services/topology_sync_service.py`, управление нодами — `services/admin_nodes_service.py`:
-- **Транспорт и авторизация:** HTTPS REST (типовой порт ноды 8444), заголовок `X-API-Key` (из `servers.api_key`, зашифровано Fernet), `Accept`/`Content-Type: application/json`.
+- **Транспорт и авторизация:** HTTPS REST (типовой порт ноды `8444`), заголовок `X-API-Key` (из `servers.api_key`, зашифровано Fernet), `Accept`/`Content-Type: application/json`.
 - **TLS и SSRF:** DNS-резолвер `SafeResolver` (`utils/security.py`) режет приватные/loopback/metadata адреса (если не включены `ALLOW_LOCAL_HTTP`/`ALLOW_LOCAL_HTTPS`); при заданном `XRAY_NODE_CA_FILE` проверяется CA, иначе по умолчанию допускаются самоподписанные сертификаты (`allow_insecure_tls=True`). В админке добавление ноды разрешено только по публичному FQDN (IP-литералы запрещены).
-- **Ретраи и ошибки:** экспоненциальный backoff на HTTP `502/503/504`, сетевые ошибки и таймауты (`max_retries=2`, для `PUT /v1/node/links` — 1). UUID в URL маскируются в логах.
+- **Ретраи и ошибки:** экспоненциальный backoff на HTTP `502/503/504`, сетевые ошибки и таймауты. UUID в URL маскируются в логах.
 - **Эндпоинты `just1knode`, вызываемые со стороны бота:**
   - `GET /v1/health` — fail-closed проверка (`status == "ok"`, `xray_running is True`, `grpc_ok is True`), отдаёт `node_epoch`, `boot_id`, `starttime`, `capabilities`/`services`, `system_load`.
-  - `GET /v1/node/status` — auto-discovery v2 (`role`: `ru_hub`/`eu_hub`/`exit_node`, домены, CDN-домены, `bridge_uuid`, `location_code`, `xhttp_locations`, `sni_routes`, `last_apply`, `ssl_cert`).
+  - `GET /v1/node/status` — auto-discovery v2 (`role`: `ru_hub`/`eu_hub`/`exit_node`, `country_code`, домены, CDN-домены, `bridge_uuid`, `xhttp_locations`, `sni_routes`, `last_apply`, `ssl_cert`; опциональный `location_code` подхватывается при наличии, иначе для `exit_node` назначается ботом).
   - `PUT /v1/node/links` — пуш вычисленной топологии (SSOT = бот):
     - `exit_node`: `allowed_hub_ips`, `incoming_hubs`;
     - `eu_hub`: `allowed_ru_ips`, `incoming_ru_hubs`, `exit_nodes`, `routes` (с детерминированным UUIDv5 по `(eu_id, exit_id, eu_bridge_uuid)`);
     - `ru_hub`: `standard.bridges`, `bi.{bridges, locations, secret_base_path}`, опционально `probe_bridges`.
-  - `POST /v1/clients/sync` — синхронизация одного клиента (`client_id`, `desired_state`: `active`|`disabled`, `version`, `expected_node_epoch`, `idempotency_key`, `service`: `vless`|`white_internet`, `email`). Ответ маппится в `SyncResult`: `APPLIED`, `ALREADY_NEWER`, `FENCED` (включая HTTP `409`/`412`), `FAILED`, с полями `verified_epoch`, `verified_inbounds`, `all_inbounds_verified`.
+  - `POST /v1/clients/sync` — синхронизация одного клиента (`client_id`, `desired_state`: `active`|`disabled`, `version`, `expected_node_epoch`, `idempotency_key`, `service`: `vless`|`white_internet`, `email`). Ответ маппится в `SyncResult`: `APPLIED`, `ALREADY_NEWER`, `FENCED` (бот маппит и HTTP `412` epoch fencing, и HTTP `409` конфликта `idempotency_key` в `FENCED`), `FAILED`, с полями `verified_epoch`, `verified_inbounds`, `all_inbounds_verified`.
   - `POST /v1/clients/batch-sync` — пакетная синхронизация (`{"clients": [...]}` → `succeeded`, `failed`; при `404` graceful fallback на поштучный sync).
   - `POST /v1/clients/inventory` — фактическое состояние клиентов в памяти Xray (`client_ids`, `service`).
   - `GET /v1/traffic/snapshot` — счётчики трафика (`node_epoch`, `boot_id`, `starttime`, `users`, `users_by_service`, `host_tx_bytes`, `host_rx_bytes`).
@@ -102,7 +102,7 @@
 
 ## 4. Хранение данных, внешние интеграции и переменные окружения
 
-- **СУБД:** PostgreSQL 16 (`asyncpg`, пул `pool_size=20`, `max_overflow=15`, `statement_timeout=60s`, `idle_in_transaction_session_timeout=120s`), SQLAlchemy 2 Async ORM (`database/models.py`), миграции Alembic (`alembic/versions/`).
+- **СУБД:** PostgreSQL 16 (`asyncpg`, пул соединений с `statement_timeout` и `idle_in_transaction_session_timeout`), SQLAlchemy 2 Async ORM (`database/models.py`), миграции Alembic (`alembic/versions/`).
 - **Redis:** поднимается в `docker-compose.yml`, обязателен в `Settings` и пингуется в `/health`, но в текущем прикладном коде как кэш/брокер не используется (кэши и rate-limiter'ы работают в памяти процесса).
 - **Ключевые таблицы (`database/models.py`) и репозитории (`database/repositories/`):**
   - `users` (`users_repo.py`) — Telegram-профиль, `referred_by`, флаги `financial_hold`/`topup_blocked`/`is_bot_blocked`/`is_deleted`, счётчики трафика;
@@ -112,7 +112,7 @@
   - `webhook_inbox` — идемпотентный приёмник вебхуков (`provider`, `event_key`, `status`, `payload` JSONB);
   - `vless_subscriptions` (`vless_subscription_repo.py`) — 1:1 с `users`, SSOT Standard-подписки (`token`, `uuid`, `is_active`, `expires_at`, `device_limit`, `downgrade_cooldown_until`, `version`/`last_synced_version`, `pending_revoked_uuids`, трафик/снапшоты, флаги уведомлений);
   - `white_internet_subscriptions` (`white_internet_repo.py`) — состояние и multi-hub синхронизация WI (`status`, `provisioning_status`, `base_traffic_bytes`/`extra_traffic_bytes`, `device_limit` 1..3, `pending_device_limit`, `desired_version`/`actual_version`, `node_sync_state` JSONB, `pending_revoked_uuids`, partial unique на одну live-подписку на пользователя);
-  - `user_devices` и `device_registration_events` (`user_devices_repo.py`) — единый реестр HWID с уникальным `device_uuid`, независимыми `std_priority`/`bi_priority` и скользящим 24ч окном анти-churn;
+  - `user_devices` и `device_registration_events` (`user_devices_repo.py`) — единый реестр HWID с уникальным `device_uuid`, независимыми `std_priority`/`bi_priority` и скользящим окном анти-churn;
   - `system_settings` (`system_settings_repo.py`) — runtime KV-конфиг (INCY-метаданные, `mtproto_proxy_url`, `payments_maintenance_enabled`, `wi_secret_base_path`);
   - `audit_logs` (`audit_repo.py`) — журнал аудита;
   - `broadcast_progress` — персистентное состояние рассылок (резюмируются при старте бота).
@@ -130,7 +130,7 @@
   - В `aiohttp`: `_http_correlation_middleware` → `_http_rate_limit_middleware`; пути `/health`, вебхуки ЮKassa, `/app*`, `/api/app/*`, `/sub/*`, `{WHITE_INTERNET_SUB_PATH_PREFIX}/*` обходят общий лимитер и используют собственные лимитеры внутри хендлеров. На `web.Application` стоит `client_max_size=64KB`. `HealthcheckAccessLogger` подавляет 200 OK логи `/health` и `/ping` и маскирует токены подписок (`/sub/***`, `{prefix}/***`).
 - **Блокировки и post-commit side-effects:**
   - Все финансовые операции и расчёт баланса для списания обязаны проходить через каноническую блокировку `pg_advisory_xact_lock(-user_id)` + `SELECT ... FOR UPDATE` на `users` (`database/repositories/account_ledger_repo.py` `lock_checkout_user`, `services/order_service.py` `acquire_user_account_lock`).
-  - `session_scope()` (`database/connection.py`) поддерживает `queue_post_commit_task(...)`: сетевые вызовы (синк нод, депровижн, пуши) исполняются только после commit (таймаут 45 с) и очищаются при rollback. В `close_db()` post-commit задачи отменяются **до** захвата `_db_lock`, чтобы исключить дедлок.
+  - `session_scope()` (`database/connection.py`) поддерживает `queue_post_commit_task(...)`: сетевые вызовы (синк нод, депровижн, пуши) исполняются только после commit (с таймаутом) и очищаются при rollback. В `close_db()` post-commit задачи отменяются **до** захвата `_db_lock`, чтобы исключить дедлок.
   - `topology_sync_service.py` работает через single-flight lock с coalescing-флагом `_resync_requested`, не удерживая DB-сессию во время HTTP-вызовов к нодам.
 - **Финансовые инварианты:**
   - Денежные суммы — строго целые рубли (`Decimal`, `float` запрещён в `whole_rubles`). При отрицательной корзине `real` (долг после возврата) `available` обнуляется для обеих корзин.
