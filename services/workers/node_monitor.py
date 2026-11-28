@@ -484,9 +484,6 @@ def _evaluate_cdn_probe_results(
     for tgt, res in zip(cdn_targets, cdn_results, strict=True):
         by_dom.setdefault(tgt[1].lower(), []).append((tgt, res))
 
-    yandex_items = [pair for pair in zip(cdn_targets, cdn_results, strict=True) if pair[0][0] == "cdn_yandex"]
-    yandex_healthy = bool(yandex_items) and all(res[0] for _, res in yandex_items)
-
     active_failures: list[tuple[tuple[str, str, str, bool], tuple[bool, str]]] = []
     passing_items: list[tuple[tuple[str, str, str, bool], tuple[bool, str]]] = []
     ignored_standby_domains: list[str] = []
@@ -500,9 +497,8 @@ def _evaluate_cdn_probe_results(
         is_shared_cdn = len(cdn_domain_hubs.get(dom_key, ())) > 1
         ping_passed = any((not t[3]) and r[0] for t, r in items)
         only_xhttp_404 = all(t[3] and r[1] == "404" for t, r in failed)
-        shared_secondary_while_yandex_ok = is_shared_cdn and yandex_healthy and all(t[0] != "cdn_yandex" for t, _ in failed)
 
-        if origin_ok and is_shared_cdn and ((ping_passed and only_xhttp_404) or shared_secondary_while_yandex_ok):
+        if origin_ok and is_shared_cdn and ping_passed and only_xhttp_404:
             ignored_standby_domains.append(items[0][0][1])
             continue
         active_failures.extend(failed)
@@ -519,7 +515,9 @@ def _evaluate_cdn_probe_results(
         return f_dom, f_path, (False, f_detail), False
     if passing_items:
         (_, p_dom, _, _), (_, p_detail) = passing_items[0]
-        return primary_cdn or p_dom, f"{sub_prefix}/ping", (True, p_detail), False
+        ignored_low = {d.lower() for d in ignored_standby_domains}
+        display_dom = primary_cdn if (primary_cdn and primary_cdn.strip().lower() not in ignored_low) else p_dom
+        return display_dom, f"{sub_prefix}/ping", (True, p_detail), False
     return None, None, None, bool(ignored_standby_domains)
 
 

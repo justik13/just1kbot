@@ -1013,15 +1013,21 @@ class WhiteInternetReconciliationWorker:
             for u in batch_succeeded:
                 disabled_versions[u] = version_by_uuid.get(u, 2)
                 healed += 1
-            if not batch_succeeded and batch_failed:
-                if all(err.startswith(_NODE_WIDE_BATCH_FAILURE_PREFIXES) for err in batch_failed.values()):
+            if batch_failed:
+                if not batch_succeeded and all(
+                    err.startswith(_NODE_WIDE_BATCH_FAILURE_PREFIXES) for err in batch_failed.values()
+                ):
                     logger.warning(
                         "Aborting WI stale cleanup on server %d due to node-wide batch failure: %s",
                         server_id,
                         next(iter(batch_failed.values())),
                     )
                     return healed
-                if any("fenced" in err.lower() or "epoch" in err.lower() for err in batch_failed.values()):
+                if any(
+                    ("fenced" in err.lower() or "epoch" in err.lower())
+                    and not err.startswith("Node epoch is unavailable")
+                    for err in batch_failed.values()
+                ):
                     await self._refresh_server_epoch(server_id, api_url, api_key, sf)
                     return healed
             fallback_stale = [u for u in stale_uuids if u in batch_failed]
@@ -1055,7 +1061,7 @@ class WhiteInternetReconciliationWorker:
                     if res == SyncResult.ALREADY_NEWER:
                         raw_data = getattr(resp, "raw_data", None) or {}
                         raw_state = raw_data.get("state")
-                        if raw_state == "disabled" and not raw_data.get("tombstone"):
+                        if raw_state == "disabled" and raw_data.get("all_inbounds_verified") is True:
                             res = SyncResult.APPLIED
                         else:
                             raw_v = raw_data.get("version")
