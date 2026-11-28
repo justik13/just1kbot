@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 import logging
-import re
 import time
 from typing import Any
 
@@ -62,8 +61,6 @@ class WhiteInternetReconciliationWorker:
         self.max_concurrency = max_concurrency
         self._semaphore = asyncio.Semaphore(self.max_concurrency)
         self._sub_locks: dict[int, asyncio.Lock] = {}
-        self._last_inventory_drift_check_mono: float | None = None
-        self._last_checked_server_epochs: dict[int, str] = {}
         self._last_drift_check_by_server: dict[int, tuple[float, str]] = {}
         self._drift_fail_backoff: dict[int, tuple[float, str]] = {}
 
@@ -726,23 +723,20 @@ class WhiteInternetReconciliationWorker:
             urgent_rows = (await sess.execute(stmt_urgent)).all()
             seen_sub_ids = {sub.id for sub, _, _ in urgent_rows}
 
-            remaining_limit = max(0, BATCH_SIZE - len(urgent_rows))
-            active_rows = []
-            if remaining_limit > 0:
-                stmt_active = (
-                    select(WhiteInternetSubscription, User.financial_hold, User.is_deleted)
-                    .join(User, User.id == WhiteInternetSubscription.user_id)
-                    .where(WhiteInternetSubscription.status == WhiteInternetStatus.ACTIVE)
+            stmt_active = (
+                select(WhiteInternetSubscription, User.financial_hold, User.is_deleted)
+                .join(User, User.id == WhiteInternetSubscription.user_id)
+                .where(WhiteInternetSubscription.status == WhiteInternetStatus.ACTIVE)
+            )
+            if seen_sub_ids:
+                stmt_active = stmt_active.where(
+                    WhiteInternetSubscription.id.not_in(seen_sub_ids)
                 )
-                if seen_sub_ids:
-                    stmt_active = stmt_active.where(
-                        WhiteInternetSubscription.id.not_in(seen_sub_ids)
-                    )
-                stmt_active = stmt_active.order_by(
-                    WhiteInternetSubscription.last_synced_at.asc().nullsfirst(),
-                    WhiteInternetSubscription.id.asc(),
-                ).limit(remaining_limit)
-                active_rows = (await sess.execute(stmt_active)).all()
+            stmt_active = stmt_active.order_by(
+                WhiteInternetSubscription.last_synced_at.asc().nullsfirst(),
+                WhiteInternetSubscription.id.asc(),
+            )
+            active_rows = (await sess.execute(stmt_active)).all()
 
             subs_with_flags = [*urgent_rows, *active_rows]
 
@@ -817,10 +811,6 @@ class WhiteInternetReconciliationWorker:
             t[0]: t[3] for t in active_server_targets if t[0] not in decommissioning_server_ids
         }
         now_mono = time.monotonic()
-        force_full_drift = (
-            self._last_inventory_drift_check_mono is not None
-            and (now_mono - self._last_inventory_drift_check_mono) >= INVENTORY_DRIFT_INTERVAL_SECONDS
-        )
         due_server_ids: set[int] = set()
         for sid, ep in non_decom_epochs.items():
             backoff = self._drift_fail_backoff.get(sid)
@@ -828,8 +818,7 @@ class WhiteInternetReconciliationWorker:
                 continue
             last_ok = self._last_drift_check_by_server.get(sid)
             if (
-                force_full_drift
-                or last_ok is None
+                last_ok is None
                 or last_ok[1] != ep
                 or (now_mono - last_ok[0]) >= INVENTORY_DRIFT_INTERVAL_SECONDS
             ):
@@ -913,60 +902,6 @@ class WhiteInternetReconciliationWorker:
                 expected_uuid_to_sub_id[str(d_uuid).strip().lower()] = sub.id
         return tasks_by_sub_id, expected_uuid_to_sub_id
 
-    async def _load_stale_wi_uuid_db_state(
-        self,
-        sf,
-        stale_uuids: list[str],
-    ) -> dict[str, tuple[int, int, int, str]]:
-        """Map stale WI UUIDs (sub.uuid or device_uuid) to (sub_id, desired_version, actual_version, status)."""
-        clean = sorted({str(u).strip().lower() for u in stale_uuids if str(u).strip()})
-        if not clean:
-            return {}
-        from database.models import UserDevice
-
-        result: dict[str, tuple[int, int, int, str]] = {}
-        async with sf() as sess:
-            direct_rows = (
-                await sess.execute(
-                    select(WhiteInternetSubscription)
-                    .where(func.lower(WhiteInternetSubscription.uuid).in_(clean))
-                    .order_by(WhiteInternetSubscription.id.desc())
-                )
-            ).scalars().all()
-            for sub in direct_rows:
-                k = str(sub.uuid or "").strip().lower()
-                if k and k not in result:
-                    result[k] = (
-                        sub.id,
-                        int(sub.desired_version or 1),
-                        int(sub.actual_version or 0),
-                        str(sub.status or ""),
-                    )
-
-            remaining = [u for u in clean if u not in result]
-            if remaining:
-                dev_rows = (
-                    await sess.execute(
-                        select(UserDevice.device_uuid, WhiteInternetSubscription)
-                        .join(
-                            WhiteInternetSubscription,
-                            WhiteInternetSubscription.user_id == UserDevice.user_id,
-                        )
-                        .where(func.lower(UserDevice.device_uuid).in_(remaining))
-                        .order_by(WhiteInternetSubscription.id.desc())
-                    )
-                ).all()
-                for dev_uuid, sub in dev_rows:
-                    k = str(dev_uuid or "").strip().lower()
-                    if k and k not in result:
-                        result[k] = (
-                            sub.id,
-                            int(sub.desired_version or 1),
-                            int(sub.actual_version or 0),
-                            str(sub.status or ""),
-                        )
-        return result
-
     async def _disable_stale_uuids_on_server(
         self,
         server_id: int,
@@ -978,19 +913,10 @@ class WhiteInternetReconciliationWorker:
         sf,
     ) -> int:
         """Disable stale active WI UUIDs with safe monotonic versioning and epoch/node failure guards."""
-        stale_db_info = await self._load_stale_wi_uuid_db_state(sf, stale_uuids)
-        version_by_uuid: dict[str, int] = {}
-        for u in stale_uuids:
-            inv_ver = inv_versions_by_uuid.get(u, 0)
-            db_info = stale_db_info.get(u)
-            if db_info is not None:
-                _sid, db_desired, db_actual, _st = db_info
-                # If node already synced db_desired, same version with opposite state triggers already_newer.
-                base_ver = db_desired + 1 if db_actual >= db_desired else db_desired
-                version_by_uuid[u] = max(base_ver, inv_ver + 1 if inv_ver > 0 else 1)
-            else:
-                # Never blindly push v=1 for orphans because initial WI clients live at v>=1.
-                version_by_uuid[u] = (inv_ver + 1) if inv_ver > 0 else 2
+        version_by_uuid: dict[str, int] = {
+            u: (inv_versions_by_uuid[u] + 1) if inv_versions_by_uuid.get(u, 0) > 0 else 2
+            for u in stale_uuids
+        }
 
         batch_payload = [
             {
@@ -1007,12 +933,9 @@ class WhiteInternetReconciliationWorker:
             api_url, api_key, batch_payload
         )
         healed = 0
-        disabled_versions: dict[str, int] = {}
         fallback_stale: list[str]
         if batch_supported:
-            for u in batch_succeeded:
-                disabled_versions[u] = version_by_uuid.get(u, 2)
-                healed += 1
+            healed += len(batch_succeeded)
             if batch_failed:
                 if not batch_succeeded and all(
                     err.startswith(_NODE_WIDE_BATCH_FAILURE_PREFIXES) for err in batch_failed.values()
@@ -1032,16 +955,11 @@ class WhiteInternetReconciliationWorker:
                     return healed
             fallback_stale = [u for u in stale_uuids if u in batch_failed]
         else:
-            batch_failed = {}
             fallback_stale = list(stale_uuids)
 
         for stale_uuid in fallback_stale:
             try:
                 send_ver = version_by_uuid.get(stale_uuid, 2)
-                err_hint = batch_failed.get(stale_uuid, "")
-                ver_match = re.search(r"\bversion=(\d+)", err_hint)
-                if ver_match:
-                    send_ver = max(send_ver, int(ver_match.group(1)) + 1)
 
                 async with self._semaphore:
                     resp = await self.client.sync_client(
@@ -1054,7 +972,6 @@ class WhiteInternetReconciliationWorker:
                         service="white_internet",
                     )
                     res = resp.result if hasattr(resp, "result") else resp[0]
-                    applied_ver = send_ver
                     if res == SyncResult.FENCED:
                         await self._refresh_server_epoch(server_id, api_url, api_key, sf)
                         break
@@ -1089,9 +1006,7 @@ class WhiteInternetReconciliationWorker:
                                 if res == SyncResult.FENCED:
                                     await self._refresh_server_epoch(server_id, api_url, api_key, sf)
                                     break
-                                applied_ver = retry_ver
                     if res == SyncResult.APPLIED:
-                        disabled_versions[stale_uuid] = applied_ver
                         healed += 1
             except Exception as exc:
                 logger.warning(
@@ -1100,39 +1015,6 @@ class WhiteInternetReconciliationWorker:
                     server_id,
                     exc,
                 )
-
-        sub_bumps: dict[int, int] = {}
-        inactive_statuses = (
-            WhiteInternetStatus.DISABLED.value,
-            WhiteInternetStatus.EXPIRED.value,
-            WhiteInternetStatus.EXHAUSTED.value,
-        )
-        for u, applied_ver in disabled_versions.items():
-            db_info = stale_db_info.get(u)
-            if db_info is None:
-                continue
-            sid_db, db_desired, _db_actual, db_status = db_info
-            if db_status in inactive_statuses and applied_ver > db_desired:
-                sub_bumps[sid_db] = max(sub_bumps.get(sid_db, 0), applied_ver)
-
-        if sub_bumps:
-            try:
-                async with sf() as sess:
-                    for sid_db, new_ver in sorted(sub_bumps.items()):
-                        sub = await white_internet_repo.get_subscription_with_lock(sess, sid_db)
-                        if (
-                            sub is not None
-                            and sub.status in (
-                                WhiteInternetStatus.DISABLED,
-                                WhiteInternetStatus.EXPIRED,
-                                WhiteInternetStatus.EXHAUSTED,
-                            )
-                            and (sub.desired_version or 1) < new_ver
-                        ):
-                            sub.desired_version = new_ver
-                    await sess.commit()
-            except Exception as bump_exc:
-                logger.warning("Failed syncing desired_version after stale WI disable: %s", bump_exc)
 
         return healed
 
@@ -1163,8 +1045,6 @@ class WhiteInternetReconciliationWorker:
         expected_active_uuids = set(expected_uuid_to_sub_id.keys())
         seen_pairs = reconciled_pairs or set()
         healed_count = 0
-        checked_epochs: dict[int, str] = {}
-        all_due_ok = True
 
         for server_id, api_url, api_key, target_epoch, xhttp_locs in due_targets:
             try:
@@ -1174,18 +1054,14 @@ class WhiteInternetReconciliationWorker:
             except Exception as exc:
                 logger.debug("WI inventory drift check skipped for server %d: %s", server_id, exc)
                 self._drift_fail_backoff[server_id] = (time.monotonic() + FAILED_DRIFT_RETRY_SECONDS, target_epoch)
-                all_due_ok = False
                 continue
             if not inv_ok or not isinstance(inv_data, dict) or not isinstance(inv_data.get("inventory"), dict):
                 if inv_err:
                     logger.debug("WI inventory drift check failed on server %d: %s", server_id, inv_err)
                 self._drift_fail_backoff[server_id] = (time.monotonic() + FAILED_DRIFT_RETRY_SECONDS, target_epoch)
-                all_due_ok = False
                 continue
 
-            now_done = time.monotonic()
-            checked_epochs[server_id] = target_epoch
-            self._last_drift_check_by_server[server_id] = (now_done, target_epoch)
+            self._last_drift_check_by_server[server_id] = (time.monotonic(), target_epoch)
             self._drift_fail_backoff.pop(server_id, None)
 
             inventory = inv_data["inventory"]
@@ -1273,17 +1149,6 @@ class WhiteInternetReconciliationWorker:
                         inv_versions_by_uuid,
                         sf,
                     )
-
-        if checked_epochs:
-            non_decom_ids = {t[0] for t in non_decom_targets}
-            merged_epochs = {
-                sid: ep for sid, ep in self._last_checked_server_epochs.items() if sid in non_decom_ids
-            }
-            merged_epochs.update(checked_epochs)
-            self._last_checked_server_epochs = merged_epochs
-            expected_all_epochs = {t[0]: t[3] for t in non_decom_targets}
-            if all_due_ok and merged_epochs == expected_all_epochs:
-                self._last_inventory_drift_check_mono = time.monotonic()
 
         return healed_count
 

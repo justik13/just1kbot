@@ -19,12 +19,58 @@ from database.repositories.servers_repo import (
     get_server_xray_api_url,
     is_v2_node_server,
 )
+from database.repositories.system_settings_repo import (
+    get_system_setting,
+    set_system_setting,
+)
 from services.xray_node_client import XrayNodeClient, _sanitize_url
 
 logger = logging.getLogger(__name__)
 
 _CODE_CLEAN_RE = re.compile(r"[^a-z0-9_-]+")
 _ROUTE_UUID_NAMESPACE = uuid.UUID("7f3b9a10-5c2d-4e8a-9f1b-2d4c6e8a0b1c")
+WI_SECRET_BASE_PATH_SETTING_KEY = "wi_secret_base_path"
+_SECRET_BASE_PATH_RE = re.compile(r"^/[A-Za-z0-9._/~-]+$")
+
+
+def _normalize_wi_secret_base_path(value: Any) -> str | None:
+    """Validate and normalize a shared White Internet XHTTP secret_base_path."""
+    if not isinstance(value, str):
+        return None
+    clean = value.strip()
+    if len(clean) > 1 and clean.endswith("/"):
+        clean = clean.rstrip("/")
+    if not clean.startswith("/") or len(clean) < 3:
+        return None
+    if not _SECRET_BASE_PATH_RE.fullmatch(clean):
+        return None
+    if ".." in clean or "//" in clean or "/./" in clean:
+        return None
+    if clean == "/sub" or clean.startswith("/sub/") or clean == "/std" or clean.startswith("/std/"):
+        return None
+    return clean
+
+
+def _select_initial_wi_secret_base_path(servers: list[Server]) -> str:
+    """Pick an existing ru_hub secret_base_path (preferring active CDN nodes) or generate one."""
+    ru_candidates: list[tuple[tuple[int, int, int], str]] = []
+    for srv in servers:
+        if get_server_role(srv) != "ru_hub":
+            continue
+        extra = srv.extra_data if isinstance(srv.extra_data, dict) else {}
+        norm = _normalize_wi_secret_base_path(extra.get("secret_base_path"))
+        if not norm:
+            continue
+        priority = (
+            0 if srv.is_active else 1,
+            0 if bool(extra.get("cdn_turboflare") or extra.get("cdn_domain")) else 1,
+            srv.id,
+        )
+        ru_candidates.append((priority, norm))
+    if ru_candidates:
+        ru_candidates.sort(key=lambda item: item[0])
+        return ru_candidates[0][1]
+    return f"/assets_{uuid.uuid4().hex[:16]}"
 _topology_sync_lock: asyncio.Lock | None = None
 _topology_sync_lock_loop: asyncio.AbstractEventLoop | None = None
 _topology_sync_running: bool = False
@@ -158,8 +204,13 @@ def _is_node_eligible(srv: Server) -> bool:
     return getattr(srv, "lifecycle_status", None) in allowed_lifecycle
 
 
-def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
+def build_v2_topology_links(
+    servers: list[Server],
+    *,
+    wi_secret_base_path: str | None = None,
+) -> dict[int, dict[str, Any]]:
     """Build per-node links.json payloads for all active v2 ru_hub, eu_hub, and exit_node servers."""
+    resolved_wi_secret = _normalize_wi_secret_base_path(wi_secret_base_path)
     active_ru: list[Server] = []
     active_eu: list[Server] = []
     active_exit: list[Server] = []
@@ -318,14 +369,18 @@ def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
                         "is_default": False,
                     })
 
+        bi_section: dict[str, Any] = {
+            "bridges": bi_bridges,
+            "locations": bi_locations,
+        }
+        if resolved_wi_secret:
+            bi_section["secret_base_path"] = resolved_wi_secret
+
         rh_payload: dict[str, Any] = {
             "standard": {
                 "bridges": std_bridges,
             },
-            "bi": {
-                "bridges": bi_bridges,
-                "locations": bi_locations,
-            },
+            "bi": bi_section,
         }
         if probe_bridges:
             rh_payload["probe_bridges"] = probe_bridges
@@ -334,7 +389,11 @@ def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
     return payloads
 
 
-async def push_v2_topology_links(servers: list[Server]) -> dict[int, bool]:
+async def push_v2_topology_links(
+    servers: list[Server],
+    *,
+    wi_secret_base_path: str | None = None,
+) -> dict[int, bool]:
     """Compute and push v2 links.json to all eligible v2 nodes without holding a DB session."""
     for srv in servers:
         if _is_node_eligible(srv) and not _extract_ipv4(srv):
@@ -343,7 +402,7 @@ async def push_v2_topology_links(servers: list[Server]) -> dict[int, bool]:
                 extra = dict(srv.extra_data or {})
                 extra["ip"] = ip_res
                 srv.extra_data = extra
-    payloads = build_v2_topology_links(servers)
+    payloads = build_v2_topology_links(servers, wi_secret_base_path=wi_secret_base_path)
 
     targets: list[tuple[int, str, str, dict[str, Any]]] = []
     for srv in servers:
@@ -410,7 +469,20 @@ async def sync_v2_topology_to_nodes_nonblocking() -> dict[int, bool]:
                 target_seq = _sync_req_seq
                 async with session_scope() as session:
                     servers = list(await get_all_servers(session))
-                results = await push_v2_topology_links(servers)
+                    wi_secret_base_path = _normalize_wi_secret_base_path(
+                        await get_system_setting(session, WI_SECRET_BASE_PATH_SETTING_KEY)
+                    )
+                    if wi_secret_base_path is None:
+                        wi_secret_base_path = _select_initial_wi_secret_base_path(servers)
+                        await set_system_setting(
+                            session,
+                            WI_SECRET_BASE_PATH_SETTING_KEY,
+                            wi_secret_base_path,
+                        )
+                results = await push_v2_topology_links(
+                    servers,
+                    wi_secret_base_path=wi_secret_base_path,
+                )
                 _last_topology_sync_results = dict(results)
                 _topology_retry_needed = any(not ok for ok in results.values())
                 _sync_completed_seq = target_seq
