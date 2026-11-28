@@ -338,8 +338,9 @@ async def refresh_nodes() -> list[dict[str, Any]]:
                 health_ok, _epoch, health_data = await client.check_health(api_url, api_key)
                 if isinstance(health_data, dict):
                     return server_id, bool(health_ok), health_data, None
-                status_ok, status_data, _err = await client.get_node_status(api_url, api_key)
-                return server_id, bool(status_ok), None, status_data if isinstance(status_data, dict) else None
+                _status_ok, status_data, _err = await client.get_node_status(api_url, api_key)
+                # /v1/health failed (e.g., Xray down): persist status telemetry without updating last_successful_check.
+                return server_id, False, None, status_data if isinstance(status_data, dict) else None
             except Exception as exc:
                 logger.debug("Live node refresh probe failed for server %d: %s", server_id, exc)
                 return server_id, False, None, None
@@ -351,7 +352,7 @@ async def refresh_nodes() -> list[dict[str, Any]]:
         )
 
     async with session_scope() as session:
-        for server_id, probe_ok, health_data, status_data in results:
+        for server_id, probe_ok, health_data, status_data in sorted(results, key=lambda r: r[0]):
             payload = health_data if isinstance(health_data, dict) else status_data
             if not isinstance(payload, dict):
                 continue
@@ -359,7 +360,21 @@ async def refresh_nodes() -> list[dict[str, Any]]:
             if srv is None:
                 continue
 
-            merged_extra = merge_v2_extra_data(srv.extra_data, status_data, health_data)
+            base_extra = srv.extra_data if isinstance(srv.extra_data, dict) else {}
+            merged_extra = merge_v2_extra_data(base_extra, status_data, health_data)
+            if "cdn_domain" in payload and payload["cdn_domain"] is None:
+                merged_extra["cdn_domain"] = ""
+            if "sub_path_prefix" in payload and not payload["sub_path_prefix"]:
+                if "sub_path_prefix" in base_extra:
+                    merged_extra["sub_path_prefix"] = base_extra["sub_path_prefix"]
+                else:
+                    merged_extra.pop("sub_path_prefix", None)
+            if payload.get("role") is None:
+                if "role" in base_extra:
+                    merged_extra["role"] = base_extra["role"]
+                else:
+                    merged_extra.pop("role", None)
+
             sys_load = payload.get("system_load")
             if isinstance(sys_load, dict):
                 merged_extra["system_load"] = sys_load
