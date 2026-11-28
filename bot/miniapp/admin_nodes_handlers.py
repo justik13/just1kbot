@@ -43,6 +43,18 @@ async def api_admin_nodes_list_handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": True, "nodes": nodes})
 
 
+async def api_admin_nodes_refresh_handler(request: web.Request) -> web.Response:
+    ctx, err_resp = await require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    try:
+        result = await admin_nodes_service.refresh_nodes()
+        return web.json_response({"ok": True, **result})
+    except AdminNodeServiceError as exc:
+        return service_error_response(exc)
+
+
 async def api_admin_nodes_add_handler(request: web.Request) -> web.Response:
     ctx, err_resp = await require_admin_user(request)
     if err_resp is not None or ctx is None:

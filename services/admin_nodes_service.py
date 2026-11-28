@@ -27,12 +27,17 @@ from database.repositories.servers_repo import (
     get_server_by_api_url,
     get_server_by_id,
     get_server_role,
+    get_server_xray_api_url,
     merge_v2_extra_data,
     update_server,
 )
 from database.connection import queue_post_commit_task, session_scope
 from services.audit_service import AuditService
-from services.workers.node_monitor import reset_server_monitor_state
+from services.workers.node_monitor import (
+    _build_v2_extra_patch,
+    apply_v2_extra_patch,
+    reset_server_monitor_state,
+)
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
 from utils.security import is_safe_url, validate_public_fqdn
@@ -312,6 +317,127 @@ async def list_nodes(session: AsyncSession) -> list[dict[str, Any]]:
     return [serialize_server_node(s) for s in servers]
 
 
+_refresh_lock: asyncio.Lock | None = None
+_refresh_lock_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _get_refresh_lock() -> asyncio.Lock:
+    global _refresh_lock, _refresh_lock_loop
+    loop = asyncio.get_running_loop()
+    if _refresh_lock is None or _refresh_lock_loop is not loop:
+        _refresh_lock = asyncio.Lock()
+        _refresh_lock_loop = loop
+    return _refresh_lock
+
+
+async def _execute_refresh_nodes() -> dict[str, Any]:
+    async with session_scope() as session:
+        servers = await get_all_servers(session)
+        targets: list[tuple[int, str, str | None, str]] = []
+        for s in servers:
+            if not s.is_active:
+                continue
+            probe_url = get_server_xray_api_url(s)
+            if probe_url and s.api_key:
+                targets.append((int(s.id), str(probe_url), s.api_url, str(s.api_key)))
+
+    if not targets:
+        async with session_scope() as session:
+            nodes = await list_nodes(session)
+        probe_meta: dict[str, Any] = {
+            "probed_count": 0,
+            "succeeded_count": 0,
+            "failed_node_ids": [],
+            "probed_at": now_utc().isoformat(),
+            "cached": False,
+        }
+        return {"nodes": nodes, "probe": probe_meta}
+
+    target_snapshots = {
+        sid: (probe_url, raw_api_url, key)
+        for sid, probe_url, raw_api_url, key in targets
+    }
+    sem = asyncio.Semaphore(6)
+
+    async def _probe_one(
+        client: XrayNodeClient, server_id: int, probe_url: str, api_key: str
+    ) -> tuple[int, bool, dict[str, Any] | None, dict[str, Any] | None]:
+        async with sem:
+            try:
+                if not await is_safe_url(probe_url):
+                    return server_id, False, None, None
+                health_ok, _epoch, health_data = await client.check_health(probe_url, api_key)
+                if isinstance(health_data, dict):
+                    return server_id, bool(health_ok), health_data, None
+                _status_ok, status_data, _err = await client.get_node_status(probe_url, api_key)
+                # /v1/health failed (e.g., Xray down): persist status telemetry without updating last_successful_check.
+                return server_id, False, None, status_data if isinstance(status_data, dict) else None
+            except Exception as exc:
+                logger.debug("Live node refresh probe failed for server %d: %s", server_id, exc)
+                return server_id, False, None, None
+
+    async with XrayNodeClient(timeout=5.0, max_retries=0) as client:
+        results = await asyncio.gather(
+            *(_probe_one(client, sid, probe_url, key) for sid, probe_url, _raw_url, key in targets),
+            return_exceptions=False,
+        )
+
+    probed_count = len(results)
+    succeeded_count = sum(1 for _, ok, _, _ in results if ok)
+    failed_node_ids = sorted(sid for sid, ok, _, _ in results if not ok)
+
+    async with session_scope() as session:
+        for server_id, probe_ok, health_data, status_data in sorted(results, key=lambda r: r[0]):
+            payload = health_data if isinstance(health_data, dict) else status_data
+            if not isinstance(payload, dict):
+                continue
+            srv = await get_server_by_id(session, server_id, for_update=True)
+            if srv is None:
+                continue
+            snap_probe_url, snap_api_url, snap_key = target_snapshots[server_id]
+            if (
+                srv.api_url != snap_api_url
+                or get_server_xray_api_url(srv) != snap_probe_url
+                or srv.api_key != snap_key
+            ):
+                logger.info(
+                    "Skipping telemetry write for server %d: api_url/api_key changed mid-flight",
+                    server_id,
+                )
+                continue
+
+            update_kwargs: dict[str, Any] = {}
+            extra_patch = _build_v2_extra_patch(srv.extra_data, status_data, health_data)
+            if extra_patch:
+                update_kwargs["extra_data"] = apply_v2_extra_patch(srv.extra_data, extra_patch)
+            if payload.get("role") or payload.get("capabilities"):
+                derived_caps = derive_v2_capabilities(None, payload)
+                if derived_caps and sorted(derived_caps) != sorted(srv.capabilities or []):
+                    update_kwargs["capabilities"] = derived_caps
+            if probe_ok:
+                update_kwargs["last_successful_check"] = now_utc()
+
+            if update_kwargs:
+                await update_server(session, srv, **update_kwargs)
+
+        nodes = await list_nodes(session)
+
+    probe_meta = {
+        "probed_count": probed_count,
+        "succeeded_count": succeeded_count,
+        "failed_node_ids": failed_node_ids,
+        "probed_at": now_utc().isoformat(),
+        "cached": False,
+    }
+    return {"nodes": nodes, "probe": probe_meta}
+
+
+async def refresh_nodes() -> dict[str, Any]:
+    """Probe active reachable v2 nodes outside DB transaction, persist fresh telemetry, and return nodes + probe summary."""
+    async with _get_refresh_lock():
+        return await _execute_refresh_nodes()
+
+
 async def _ensure_unique_exit_location_code(
     session: AsyncSession,
     server_id: int,
@@ -461,7 +587,8 @@ async def discover_and_add_node(
         }
 
     async with session_scope() as session:
-        return await _persist_new_node(session)
+        res = await _persist_new_node(session)
+    return res
 
 
 def _queue_topology_sync(session: AsyncSession) -> None:
@@ -638,7 +765,8 @@ async def update_node_settings(
         return serialize_server_node(updated)
 
     async with session_scope() as session:
-        return await _apply_update(session)
+        res = await _apply_update(session)
+    return res
 
 
 async def toggle_node(
@@ -904,4 +1032,6 @@ async def set_node_lifecycle(
             target_id=updated.id,
             details={"lifecycle_status": normalized},
         )
-        return serialize_server_node(updated)
+        res = serialize_server_node(updated)
+
+    return res

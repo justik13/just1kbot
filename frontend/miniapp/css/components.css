@@ -775,6 +775,71 @@ label:not(.switch):has(> input[type="checkbox"]) > input[type="checkbox"] {
     display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
+    flex: 1;
+}
+
+.node-compact-name {
+    font-weight: 600;
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.nodes-head-title {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.nodes-filter-pills {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+}
+
+.nodes-filter-pills::-webkit-scrollbar {
+    display: none;
+}
+
+.nodes-filter-pills > .pill-btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.node-domain-line {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.node-domain-line + span {
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.node-role-inline {
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.nodes-badges-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+}
+
+.nodes-badges-group {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
 }
 
 .node-chevron {
