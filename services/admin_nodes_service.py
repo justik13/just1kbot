@@ -1064,5 +1064,7 @@ async def set_node_lifecycle(
             target_id=updated.id,
             details={"lifecycle_status": normalized},
         )
-        _invalidate_refresh_cooldown()
-        return serialize_server_node(updated)
+        res = serialize_server_node(updated)
+
+    _invalidate_refresh_cooldown()
+    return res
