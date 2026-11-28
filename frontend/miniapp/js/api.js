@@ -77,7 +77,7 @@ export const api = {
     refreshNodes: () =>
         requestJson("/api/app/admin/nodes/refresh", {
             method: "POST",
-            timeoutMs: 15000,
+            timeoutMs: 30000,
         }),
     addNode: (payload) =>
         requestJson("/api/app/admin/nodes/add", {

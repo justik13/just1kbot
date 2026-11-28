@@ -80,6 +80,8 @@ const appState = {
     overviewData: null,
     nodes: [],
     nodesLoaded: false,
+    nodesLastProbeAt: null,
+    nodesLastProbeSummary: null,
     selectedNodeId: null,
     usersData: null,
     usersQuery: "",
@@ -638,9 +640,14 @@ async function _reloadNodesAndRender({ skipRender = false, removeNodeId = null, 
     }
     try {
         const res = probe ? await api.refreshNodes() : await api.listNodes();
-        if (seq !== _tabSwitchSeq || appState.mode !== "admin") return false;
         appState.nodes = res.nodes || [];
         appState.nodesLoaded = true;
+        if (probe) {
+            const probeMeta = res.probe && typeof res.probe === "object" ? res.probe : null;
+            appState.nodesLastProbeSummary = probeMeta;
+            appState.nodesLastProbeAt = (probeMeta && probeMeta.probed_at) || new Date().toISOString();
+        }
+        if (seq !== _tabSwitchSeq || appState.mode !== "admin") return false;
     } catch (err) {
         if (err && err.code === "init_data_expired") return false;
         if (seq !== _tabSwitchSeq || appState.mode !== "admin") return false;

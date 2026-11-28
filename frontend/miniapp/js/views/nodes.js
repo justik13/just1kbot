@@ -537,9 +537,34 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
         if (!dt) return latest;
         return !latest || dt.getTime() > latest.getTime() ? dt : latest;
     }, null);
-    const pollStatusLabel = latestCheckDate
-        ? `Опрос нод: ${formatRelativeTime(latestCheckDate)}`
-        : "Ноды ещё не опрашивались";
+    const probeAtDate = parseDate(state.nodesLastProbeAt);
+    const probeSummary =
+        state.nodesLastProbeSummary && typeof state.nodesLastProbeSummary === "object"
+            ? state.nodesLastProbeSummary
+            : null;
+    let pollStatusLabel;
+    if (probeAtDate) {
+        const probed = Number(probeSummary?.probed_count ?? 0);
+        const succeeded = Number(probeSummary?.succeeded_count ?? 0);
+        const failedCount = Array.isArray(probeSummary?.failed_node_ids)
+            ? probeSummary.failed_node_ids.length
+            : Math.max(0, probed - succeeded);
+        const attemptRel = formatRelativeTime(probeAtDate);
+        if (probed === 0) {
+            pollStatusLabel = `Попытка опроса: ${attemptRel} · нет активных целей`;
+        } else if (failedCount > 0) {
+            const lastOkText = latestCheckDate
+                ? ` · посл. успех: ${formatRelativeTime(latestCheckDate)}`
+                : " · успешных проверок нет";
+            pollStatusLabel = `Попытка опроса: ${attemptRel} (${succeeded}/${probed} ОК)${lastOkText}`;
+        } else {
+            pollStatusLabel = `Попытка опроса: ${attemptRel} · все ОК (${succeeded}/${probed})`;
+        }
+    } else {
+        pollStatusLabel = latestCheckDate
+            ? `Последняя успешная проверка: ${formatRelativeTime(latestCheckDate)}`
+            : "Успешных проверок ещё не было";
+    }
 
     root.innerHTML = `
         <section class="stats-strip">
@@ -586,7 +611,28 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
             const labelEl = reloadBtn.querySelector("span");
             if (labelEl) labelEl.textContent = "Опрос...";
             try {
-                await onReload({ probe: true });
+                const ok = await onReload({ probe: true });
+                if (ok) {
+                    const summary = state.nodesLastProbeSummary;
+                    const probed = Number(summary?.probed_count ?? 0);
+                    const succeeded = Number(summary?.succeeded_count ?? 0);
+                    const failedIds = Array.isArray(summary?.failed_node_ids)
+                        ? summary.failed_node_ids
+                        : [];
+                    if (probed > 0 && succeeded === 0) {
+                        showToast(
+                            `Не удалось опросить ни одну ноду (0/${probed})`,
+                            "error"
+                        );
+                    } else if (failedIds.length > 0) {
+                        const idsLabel = failedIds.slice(0, 5).map((id) => `#${id}`).join(", ");
+                        const more = failedIds.length > 5 ? ` и ещё ${failedIds.length - 5}` : "";
+                        showToast(
+                            `Опрошено ${succeeded}/${probed}. Ошибка на нодах: ${idsLabel}${more}`,
+                            "warn"
+                        );
+                    }
+                }
             } catch (err) {
                 showToast(err.message || "Не удалось обновить список", "error");
             } finally {
@@ -633,7 +679,7 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
             </span>
             <span class="row meta-text" style="gap:8px; align-items:center;">
                 <span class="node-domain-line"><span class="node-role-inline">${escapeHtml(roleLabel(node.role))}</span> · <span class="mono">${escapeHtml(node.domain || node.api_url)}</span></span>
-                <span>${health.text === "Отключена" ? escapeHtml(checkText) : `${node.is_active ? "● " : ""}${escapeHtml(checkText)}`}</span>
+                <span title="Последняя успешная проверка">${health.text === "Отключена" ? escapeHtml(checkText) : `${node.is_active ? "● " : ""}${escapeHtml(checkText)}`}</span>
             </span>
             ${scopeBadges || diagBadges ? `
                 <span class="nodes-badges-row">
