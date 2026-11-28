@@ -1056,9 +1056,14 @@ class VlessSubscriptionService:
             and all(results.values())
             and len(results) == len(targets)
         ):
-            sub.last_synced_at = now_utc()
-            sub.last_synced_version = sub_version
-            await session.flush()
+            locked_sub = await vless_subscription_repo.lock_subscription_with_user(session, sub.id)
+            if locked_sub is not None:
+                locked_sub.last_synced_at = now_utc()
+                locked_sub.last_synced_version = max(
+                    getattr(locked_sub, "last_synced_version", 0) or 0,
+                    sub_version,
+                )
+                await session.flush()
 
         return results
 

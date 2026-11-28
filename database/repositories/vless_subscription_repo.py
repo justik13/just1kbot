@@ -74,19 +74,24 @@ async def get_subscription_by_user_id(
     return val if isinstance(val, VlessSubscription) else None
 
 
-async def _lock_vless_subscription_with_user(
+async def lock_subscription_with_user(
     session: AsyncSession,
     subscription_id: int,
 ) -> VlessSubscription | None:
     """Lock User FIRST, then VlessSubscription SECOND (canonical lock hierarchy)."""
-    user_id = await session.scalar(
-        select(VlessSubscription.user_id).where(VlessSubscription.id == subscription_id)
-    )
-    if user_id is None:
+    row = (
+        await session.execute(
+            select(VlessSubscription.id, VlessSubscription.user_id).where(
+                VlessSubscription.id == subscription_id
+            )
+        )
+    ).first()
+    if row is None:
         return None
-    await session.execute(
-        select(User.id).where(User.id == user_id).with_for_update()
-    )
+    if row.user_id is not None:
+        await session.execute(
+            select(User.id).where(User.id == row.user_id).with_for_update()
+        )
     return await session.scalar(
         select(VlessSubscription)
         .where(VlessSubscription.id == subscription_id)
@@ -104,7 +109,7 @@ async def reset_hwids(
     Returns:
         tuple[old_uuid, new_uuid] or (None, None) if subscription not found.
     """
-    sub = await _lock_vless_subscription_with_user(session, subscription_id)
+    sub = await lock_subscription_with_user(session, subscription_id)
     if isinstance(sub, VlessSubscription):
         old_uuid = sub.uuid
         new_uuid = str(uuid.uuid4())
@@ -131,7 +136,7 @@ async def rotate_token(
     Returns:
         tuple[new_token, old_uuid, new_uuid]
     """
-    sub = await _lock_vless_subscription_with_user(session, subscription_id)
+    sub = await lock_subscription_with_user(session, subscription_id)
     if not isinstance(sub, VlessSubscription):
         raise ValueError(f"VlessSubscription {subscription_id} not found")
 
@@ -161,7 +166,7 @@ async def add_pending_revocation_uuids(
     """Adds a list of revoked UUIDs to pending_revoked_uuids under row lock."""
     if not uuids:
         return None
-    sub = await _lock_vless_subscription_with_user(session, subscription_id)
+    sub = await lock_subscription_with_user(session, subscription_id)
     if isinstance(sub, VlessSubscription):
         pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
         added = False
@@ -182,7 +187,7 @@ async def pop_pending_revoked_uuid(
     uuid_to_remove: str,
 ) -> None:
     """Removes a successfully deprovisioned UUID from pending_revoked_uuids under row lock."""
-    sub = await _lock_vless_subscription_with_user(session, subscription_id)
+    sub = await lock_subscription_with_user(session, subscription_id)
     if isinstance(sub, VlessSubscription) and sub.pending_revoked_uuids:
         sub.pending_revoked_uuids = [u for u in sub.pending_revoked_uuids if u != uuid_to_remove]
         await session.flush()
@@ -211,7 +216,7 @@ async def bump_subscription_version(
     subscription_id: int,
 ) -> VlessSubscription | None:
     """Atomically bump subscription version under row lock."""
-    sub = await _lock_vless_subscription_with_user(session, subscription_id)
+    sub = await lock_subscription_with_user(session, subscription_id)
     if sub:
         sub.version = (sub.version or 1) + 1
         await session.flush()
@@ -243,7 +248,7 @@ async def record_vless_traffic_atomic(
     str_server_id = str(server_id)
     str_epoch = str(node_epoch)
 
-    sub = await _lock_vless_subscription_with_user(session, subscription_id)
+    sub = await lock_subscription_with_user(session, subscription_id)
     if not sub:
         return 0, 0, 0
 
