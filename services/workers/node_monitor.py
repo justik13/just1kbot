@@ -471,54 +471,20 @@ def _collect_cdn_probe_targets(
 
 
 def _evaluate_cdn_probe_results(
-    server_id: int,
-    origin_ok: bool,
     cdn_targets: list[tuple[str, str, str, bool]],
     cdn_results: list[tuple[bool, str]],
-    cdn_domain_hubs: dict[str, set[int]],
     primary_cdn: str | None,
     sub_prefix: str,
 ) -> tuple[str | None, str | None, tuple[bool, str] | None, bool]:
-    """Evaluate CDN probe results without falsely poisoning a hub on warm-standby shared CDNs."""
-    by_dom: dict[str, list[tuple[tuple[str, str, str, bool], tuple[bool, str]]]] = {}
-    for tgt, res in zip(cdn_targets, cdn_results, strict=True):
-        by_dom.setdefault(tgt[1].lower(), []).append((tgt, res))
-
-    active_failures: list[tuple[tuple[str, str, str, bool], tuple[bool, str]]] = []
-    passing_items: list[tuple[tuple[str, str, str, bool], tuple[bool, str]]] = []
-    ignored_standby_domains: list[str] = []
-
-    for dom_key, items in by_dom.items():
-        failed = [(t, r) for t, r in items if not r[0]]
-        if not failed:
-            passing_items.extend(items)
-            continue
-
-        is_shared_cdn = len(cdn_domain_hubs.get(dom_key, ())) > 1
-        ping_passed = any((not t[3]) and r[0] for t, r in items)
-        only_xhttp_404 = all(t[3] and r[1] == "404" for t, r in failed)
-
-        if origin_ok and is_shared_cdn and ping_passed and only_xhttp_404:
-            ignored_standby_domains.append(items[0][0][1])
-            continue
-        active_failures.extend(failed)
-
-    if ignored_standby_domains:
-        logger.info(
-            "Node %d local origin XHTTP healthy; ignoring shared standby CDN route mismatch for %s.",
-            server_id,
-            ",".join(ignored_standby_domains),
-        )
-
-    if active_failures:
-        (_, f_dom, f_path, _), (_, f_detail) = active_failures[0]
-        return f_dom, f_path, (False, f_detail), False
-    if passing_items:
-        (_, p_dom, _, _), (_, p_detail) = passing_items[0]
-        ignored_low = {d.lower() for d in ignored_standby_domains}
-        display_dom = primary_cdn if (primary_cdn and primary_cdn.strip().lower() not in ignored_low) else p_dom
-        return display_dom, f"{sub_prefix}/ping", (True, p_detail), False
-    return None, None, None, bool(ignored_standby_domains)
+    """Evaluate CDN probe results directly; DNS warm-standby filtering happens before probing."""
+    for (_, dom, path, _), res in zip(cdn_targets, cdn_results, strict=True):
+        if not res[0]:
+            return dom, path, (False, res[1]), False
+    if cdn_targets:
+        active_doms = {t[1] for t in cdn_targets}
+        display_dom = primary_cdn if (primary_cdn and primary_cdn in active_doms) else cdn_targets[0][1]
+        return display_dom, f"{sub_prefix}/ping", (True, cdn_results[0][1]), False
+    return None, None, None, False
 
 
 async def _run_topology_sync_with_retry_tracking(context: str) -> None:
@@ -958,7 +924,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                 all_enabled_eu_ids.add(_srv.id)
 
     wi_hub_origin_hosts: dict[int, set[str]] = {}
-    cdn_domain_hubs: dict[str, set[int]] = {}
     all_wi_dns_hosts: set[str] = set()
     for _srv in servers:
         if not getattr(_srv, "is_active", False) or getattr(_srv, "lifecycle_status", None) not in (
@@ -989,7 +954,6 @@ async def check_node_resources_and_alerts(bot: Bot):
         wi_hub_origin_hosts[_srv.id] = _hosts
         all_wi_dns_hosts.update(_hosts)
         for _cdom in _collect_server_cdn_domains(_extra):
-            cdn_domain_hubs.setdefault(_cdom, set()).add(_srv.id)
             all_wi_dns_hosts.add(_cdom)
 
     dns_cache: dict[str, set[str]] = {}
@@ -1197,11 +1161,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                             cdn_probe_result,
                             cdn_standby_cleared,
                         ) = _evaluate_cdn_probe_results(
-                            server.id,
-                            origin_probe_result[0],
                             cdn_targets,
                             cdn_results,
-                            cdn_domain_hubs,
                             cdn_domain,
                             sub_prefix,
                         )
