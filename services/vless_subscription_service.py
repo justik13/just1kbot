@@ -475,33 +475,41 @@ class VlessSubscriptionService:
         async def _run() -> None:
             from database.connection import session_scope
             try:
-                async with session_scope() as scoped_session:
-                    await cls.sync_user_to_nodes(scoped_session, user_id, is_active=is_active)
+                async with session_scope() as sync_session:
+                    await cls.sync_user_to_nodes(sync_session, user_id, is_active=is_active)
 
-                    # Retry deprovisioning for any pending revoked UUIDs (including location UUIDs)
-                    sub = await vless_subscription_repo.get_subscription_by_user_id(scoped_session, user_id)
-                    if sub and sub.pending_revoked_uuids:
-                        servers = await cls.get_revocation_target_servers(scoped_session)
-                        targets = cls._extract_node_targets(servers)
-                        exit_nodes = await cls.get_all_exit_nodes_for_revocation(scoped_session)
-                        if targets:
-                            sub_ver = getattr(sub, "version", 1) or 1
-                            for rev_uuid in list(sub.pending_revoked_uuids):
-                                expanded = cls._expand_revocation_uuids(rev_uuid, exit_nodes)
-                                results: dict[int, bool] = {}
-                                for u in expanded:
-                                    deprov_res = await cls._execute_deprovision_on_nodes(
-                                        targets, u, version=sub_ver
-                                    )
-                                    for s_id, ok in deprov_res.items():
-                                        results[s_id] = results.get(s_id, True) and ok
-                                if (
-                                    servers
-                                    and len(targets) == len(servers)
-                                    and all(results.values())
-                                    and len(results) == len(targets)
-                                ):
-                                    await vless_subscription_repo.pop_pending_revoked_uuid(scoped_session, sub.id, rev_uuid)
+                # Retry deprovisioning for any pending revoked UUIDs (short read -> HTTP -> short pop)
+                async with session_scope() as read_session:
+                    sub = await vless_subscription_repo.get_subscription_by_user_id(read_session, user_id)
+                    if not (sub and sub.pending_revoked_uuids):
+                        return
+                    sub_id = sub.id
+                    sub_ver = getattr(sub, "version", 1) or 1
+                    rev_uuids = list(sub.pending_revoked_uuids)
+                    servers = await cls.get_revocation_target_servers(read_session)
+                    targets = cls._extract_node_targets(servers)
+                    exit_nodes = await cls.get_all_exit_nodes_for_revocation(read_session)
+
+                if targets:
+                    for rev_uuid in rev_uuids:
+                        expanded = cls._expand_revocation_uuids(rev_uuid, exit_nodes)
+                        results: dict[int, bool] = {}
+                        for u in expanded:
+                            deprov_res = await cls._execute_deprovision_on_nodes(
+                                targets, u, version=sub_ver
+                            )
+                            for s_id, ok in deprov_res.items():
+                                results[s_id] = results.get(s_id, True) and ok
+                        if (
+                            servers
+                            and len(targets) == len(servers)
+                            and all(results.values())
+                            and len(results) == len(targets)
+                        ):
+                            async with session_scope() as pop_session:
+                                await vless_subscription_repo.pop_pending_revoked_uuid(
+                                    pop_session, sub_id, rev_uuid
+                                )
             except Exception as e:
                 logger.warning("Background sync of VLESS user %s failed: %s", user_id, e)
 
@@ -1024,16 +1032,16 @@ class VlessSubscriptionService:
 
         results, all_items_ok, needs_version_bump = await _run_sync_pass(sub_version)
 
-        # If node reported version conflict, bump version and retry across all targets
+        # If node reported version conflict, bump version in a short tx before network retry
         if needs_version_bump:
-            locked_sub = await vless_subscription_repo.bump_subscription_version(session, sub.id)
-            if locked_sub:
-                sub = locked_sub
-                sub_version = locked_sub.version
-            else:
-                sub.version = sub_version + 1
-                await session.flush()
-                sub_version = sub.version
+            from database.connection import session_scope
+
+            async with session_scope() as bump_session:
+                locked_sub = await vless_subscription_repo.bump_subscription_version(bump_session, sub.id)
+                if locked_sub is not None:
+                    sub_version = locked_sub.version
+                else:
+                    sub_version = sub_version + 1
             results, all_items_ok, _ = await _run_sync_pass(sub_version)
 
         if excess_uuids:

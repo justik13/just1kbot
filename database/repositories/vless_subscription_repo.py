@@ -79,13 +79,14 @@ async def lock_subscription_with_user(
     subscription_id: int,
 ) -> VlessSubscription | None:
     """Lock User FIRST, then VlessSubscription SECOND (canonical lock hierarchy)."""
-    row = (
-        await session.execute(
-            select(VlessSubscription.id, VlessSubscription.user_id).where(
-                VlessSubscription.id == subscription_id
+    with session.no_autoflush:
+        row = (
+            await session.execute(
+                select(VlessSubscription.id, VlessSubscription.user_id).where(
+                    VlessSubscription.id == subscription_id
+                )
             )
-        )
-    ).first()
+        ).first()
     if row is None:
         return None
     if row.user_id is not None:
