@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from config.constants import (
     CANONICAL_XHTTP_PROFILE,
+    CANONICAL_XHTTP_TURBOFLARE_PROFILE,
     DEFAULT_WHITE_INTERNET_PATH,
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
@@ -957,40 +958,27 @@ class WhiteInternetService:
         effective_badge = direct_hub_badge or origin_badge
         effective_path = direct_hub_path or origin_path
 
-        if str(cdn_type or "").strip().lower() == "cdn_turboflare":
-            extra_dict = {
-                "mode": CANONICAL_XHTTP_PROFILE["mode"],
-                "uplinkHTTPMethod": "POST",
-                "uplinkDataPlacement": "body",
-                "uplinkDataKey": "",
-                "scMaxEachPostBytes": 65536,
-                "scMaxConcurrentPosts": 2,
-                "scMinPostsIntervalMs": 10,
-                "xPaddingObfsMode": CANONICAL_XHTTP_PROFILE["xPaddingObfsMode"],
-                "xPaddingKey": CANONICAL_XHTTP_PROFILE["xPaddingKey"],
-                "xPaddingHeader": CANONICAL_XHTTP_PROFILE["xPaddingHeader"],
-                "xPaddingMethod": CANONICAL_XHTTP_PROFILE["xPaddingMethod"],
-                "xPaddingPlacement": "header",
-                "xPaddingBytes": CANONICAL_XHTTP_PROFILE.get("xPaddingBytes", "100-1000"),
-                "xmux": CANONICAL_XHTTP_PROFILE["xmux"],
-            }
-        else:
-            extra_dict = {
-                "mode": CANONICAL_XHTTP_PROFILE["mode"],
-                "uplinkHTTPMethod": CANONICAL_XHTTP_PROFILE["uplinkHTTPMethod"],
-                "uplinkDataPlacement": CANONICAL_XHTTP_PROFILE["uplinkDataPlacement"],
-                "uplinkDataKey": CANONICAL_XHTTP_PROFILE["uplinkDataKey"],
-                "scMaxEachPostBytes": CANONICAL_XHTTP_PROFILE["scMaxEachPostBytes"],
-                "scMaxConcurrentPosts": CANONICAL_XHTTP_PROFILE["scMaxConcurrentPosts"],
-                "scMinPostsIntervalMs": CANONICAL_XHTTP_PROFILE["scMinPostsIntervalMs"],
-                "xPaddingObfsMode": CANONICAL_XHTTP_PROFILE["xPaddingObfsMode"],
-                "xPaddingKey": CANONICAL_XHTTP_PROFILE["xPaddingKey"],
-                "xPaddingHeader": CANONICAL_XHTTP_PROFILE["xPaddingHeader"],
-                "xPaddingMethod": CANONICAL_XHTTP_PROFILE["xPaddingMethod"],
-                "xPaddingPlacement": CANONICAL_XHTTP_PROFILE["xPaddingPlacement"],
-                "xPaddingBytes": CANONICAL_XHTTP_PROFILE.get("xPaddingBytes", "100-1000"),
-                "xmux": CANONICAL_XHTTP_PROFILE["xmux"],
-            }
+        profile = (
+            CANONICAL_XHTTP_TURBOFLARE_PROFILE
+            if str(cdn_type or "").strip().lower() == "cdn_turboflare"
+            else CANONICAL_XHTTP_PROFILE
+        )
+        extra_dict = {
+            "mode": profile["mode"],
+            "uplinkHTTPMethod": profile["uplinkHTTPMethod"],
+            "uplinkDataPlacement": profile["uplinkDataPlacement"],
+            "uplinkDataKey": profile["uplinkDataKey"],
+            "scMaxEachPostBytes": profile["scMaxEachPostBytes"],
+            "scMaxConcurrentPosts": profile["scMaxConcurrentPosts"],
+            "scMinPostsIntervalMs": profile["scMinPostsIntervalMs"],
+            "xPaddingObfsMode": profile["xPaddingObfsMode"],
+            "xPaddingKey": profile["xPaddingKey"],
+            "xPaddingHeader": profile["xPaddingHeader"],
+            "xPaddingMethod": profile["xPaddingMethod"],
+            "xPaddingPlacement": profile["xPaddingPlacement"],
+            "xPaddingBytes": profile.get("xPaddingBytes", "100-1000"),
+            "xmux": profile["xmux"],
+        }
         extra_param = urllib.parse.quote(json.dumps(extra_dict, separators=(",", ":")))
         fp = CANONICAL_XHTTP_PROFILE.get("fp", WHITE_INTERNET_TLS_FINGERPRINT)
         base = _normalize_base_path(path)

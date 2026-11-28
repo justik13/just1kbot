@@ -519,19 +519,17 @@ async def clear_active_pending_revocations(
     if getattr(sub, "uuid", None):
         live_uuids.add(str(sub.uuid).strip().lower())
     if getattr(sub, "user_id", None) is not None:
-        from database.models import UserDevice
+        from database.repositories import user_devices_repo
 
-        dev_uuids = (
-            await session.scalars(
-                select(UserDevice.device_uuid).where(
-                    UserDevice.user_id == sub.user_id,
-                    UserDevice.is_wi_assigned.is_(True),
-                )
-            )
-        ).all()
-        for du in dev_uuids:
-            if du:
-                live_uuids.add(str(du).strip().lower())
+        dev_limit = max(0, int(getattr(sub, "device_limit", 1) or 1))
+        devices = await user_devices_repo.list_user_devices(
+            session,
+            int(sub.user_id),
+            wi_device_limit=dev_limit,
+        )
+        for dev in devices:
+            if dev.get("is_bi_assigned") and dev.get("device_uuid"):
+                live_uuids.add(str(dev["device_uuid"]).strip().lower())
     if not live_uuids:
         return
     new_pending = [u for u in pending if str(u).strip().lower() not in live_uuids]
@@ -546,32 +544,23 @@ async def collect_displaced_wi_device_uuids(
     user_id: int,
     new_device_limit: int,
 ) -> list[str]:
-    """Unassign excess WI device slots beyond new_device_limit and return displaced UUIDs."""
-    from database.models import UserDevice
+    """Return BI-eligible device UUIDs displaced beyond new_device_limit."""
+    from database.repositories import user_devices_repo
 
     keep_limit = max(0, int(new_device_limit))
-    assigned = list(
-        (
-            await session.scalars(
-                select(UserDevice)
-                .where(
-                    UserDevice.user_id == user_id,
-                    UserDevice.is_wi_assigned.is_(True),
-                )
-                .order_by(UserDevice.created_at.asc(), UserDevice.id.asc())
-            )
-        ).all()
+    devices = await user_devices_repo.list_user_devices(
+        session,
+        int(user_id),
+        wi_device_limit=0,
     )
-    if len(assigned) <= keep_limit:
+    eligible_uuids = [
+        str(d["device_uuid"]).strip().lower()
+        for d in devices
+        if int(d.get("bi_priority") or 0) >= 0 and d.get("device_uuid")
+    ]
+    if len(eligible_uuids) <= keep_limit:
         return []
-    displaced_devs = assigned[keep_limit:]
-    displaced_uuids: list[str] = []
-    for dev in displaced_devs:
-        dev.is_wi_assigned = False
-        if dev.device_uuid:
-            displaced_uuids.append(str(dev.device_uuid).strip().lower())
-    await session.flush()
-    return displaced_uuids
+    return eligible_uuids[keep_limit:]
 
 
 async def record_wi_traffic_atomic(

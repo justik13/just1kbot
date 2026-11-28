@@ -461,21 +461,39 @@ class WhiteInternetReconciliationWorker:
             )
             subs = (await sess.execute(stmt)).scalars().all()
             sub_user_ids = list({s.user_id for s in subs if getattr(s, "user_id", None) is not None})
+            wi_limit_by_user: dict[int, int] = {}
+            for s in subs:
+                uid_val = getattr(s, "user_id", None)
+                if uid_val is None:
+                    continue
+                if s.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE):
+                    lim = max(1, int(getattr(s, "device_limit", 1) or 1))
+                    wi_limit_by_user[int(uid_val)] = max(wi_limit_by_user.get(int(uid_val), 0), lim)
             active_devs_by_user: dict[int, set[str]] = {}
             if sub_user_ids:
                 dev_rows = (
                     await sess.execute(
-                        select(UserDevice.user_id, UserDevice.device_uuid).where(
+                        select(UserDevice.user_id, UserDevice.device_uuid)
+                        .where(
                             UserDevice.user_id.in_(sub_user_ids),
-                            UserDevice.is_wi_assigned.is_(True),
+                            UserDevice.bi_priority >= 0,
+                        )
+                        .order_by(
+                            UserDevice.user_id.asc(),
+                            UserDevice.bi_priority.desc(),
+                            UserDevice.first_seen_at.asc(),
+                            UserDevice.id.asc(),
                         )
                     )
                 ).all()
                 for uid_val, dev_uuid in dev_rows:
-                    if dev_uuid:
-                        active_devs_by_user.setdefault(int(uid_val), set()).add(
-                            str(dev_uuid).strip().lower()
-                        )
+                    if not dev_uuid:
+                        continue
+                    uid_int = int(uid_val)
+                    cap = wi_limit_by_user.get(uid_int, 0)
+                    bucket = active_devs_by_user.setdefault(uid_int, set())
+                    if len(bucket) < cap:
+                        bucket.add(str(dev_uuid).strip().lower())
             work = [
                 (
                     s.id,
@@ -744,6 +762,7 @@ class WhiteInternetReconciliationWorker:
                 })
 
         synced_count = 0
+        reconciled_pairs: set[tuple[int, int]] = set()
         for server_id, api_url, api_key, target_epoch, xhttp_locs in active_server_targets:
             per_server_tasks = []
             is_decommissioning = server_id in decommissioning_server_ids
@@ -758,6 +777,7 @@ class WhiteInternetReconciliationWorker:
                     or n_state.get("active") is not task["desired_active"]
                     or task["actual_version"] != task["target_version"]
                 ):
+                    reconciled_pairs.add((task["sub_id"], server_id))
                     per_server_tasks.append(
                         self._reconcile_sub_on_server(
                             server_id,
@@ -779,12 +799,225 @@ class WhiteInternetReconciliationWorker:
                     elif r is True:
                         synced_count += 1
 
+        synced_count += await self._reconcile_inventory_drift(
+            active_server_targets,
+            decommissioning_server_ids,
+            active_only_server_ids,
+            server_epochs,
+            sf,
+            reconciled_pairs=reconciled_pairs,
+        )
         synced_count += await self._reconcile_pending_revocations(
             active_server_targets,
             sf,
             expected_hub_count=total_active_wi_hubs,
         )
         return synced_count
+
+    async def _collect_active_wi_inventory_truth(
+        self,
+        sf,
+    ) -> tuple[dict[int, dict], dict[str, int]]:
+        """Return (sub_tasks_by_id, expected_active_uuid -> sub_id) from DB."""
+        now = now_utc()
+        async with sf() as sess:
+            active_rows = (
+                await sess.execute(
+                    select(WhiteInternetSubscription)
+                    .join(User, User.id == WhiteInternetSubscription.user_id)
+                    .where(
+                        WhiteInternetSubscription.status.in_([
+                            WhiteInternetStatus.PENDING,
+                            WhiteInternetStatus.ACTIVE,
+                        ]),
+                        or_(
+                            WhiteInternetSubscription.expires_at.is_(None),
+                            WhiteInternetSubscription.expires_at > now,
+                        ),
+                        User.financial_hold.is_(False),
+                        User.is_deleted.is_(False),
+                    )
+                    .order_by(WhiteInternetSubscription.id.asc())
+                )
+            ).scalars().all()
+            user_ids = list({s.user_id for s in active_rows if getattr(s, "user_id", None) is not None})
+            devs_by_user: dict[int, list[str]] = {}
+            if user_ids:
+                dev_rows = (
+                    await sess.execute(
+                        select(UserDevice.user_id, UserDevice.device_uuid)
+                        .where(
+                            UserDevice.user_id.in_(user_ids),
+                            UserDevice.bi_priority >= 0,
+                        )
+                        .order_by(
+                            UserDevice.user_id.asc(),
+                            UserDevice.bi_priority.desc(),
+                            UserDevice.first_seen_at.asc(),
+                            UserDevice.id.asc(),
+                        )
+                    )
+                ).all()
+                for uid_val, dev_uuid in dev_rows:
+                    if dev_uuid:
+                        devs_by_user.setdefault(int(uid_val), []).append(
+                            str(dev_uuid).strip().lower()
+                        )
+
+        tasks_by_sub_id: dict[int, dict] = {}
+        expected_uuid_to_sub_id: dict[str, int] = {}
+        for sub in active_rows:
+            dev_limit = max(1, int(getattr(sub, "device_limit", 1) or 1))
+            tasks_by_sub_id[sub.id] = {
+                "sub_id": sub.id,
+                "user_id": sub.user_id,
+                "uuid": sub.uuid,
+                "device_limit": dev_limit,
+                "desired_active": True,
+                "target_version": sub.desired_version,
+                "node_sync_state": dict(sub.node_sync_state or {}) if isinstance(sub.node_sync_state, dict) else {},
+                "actual_version": sub.actual_version,
+            }
+            if sub.uuid:
+                expected_uuid_to_sub_id[str(sub.uuid).strip().lower()] = sub.id
+            for d_uuid in devs_by_user.get(int(sub.user_id), [])[:dev_limit]:
+                expected_uuid_to_sub_id[d_uuid] = sub.id
+        return tasks_by_sub_id, expected_uuid_to_sub_id
+
+    async def _reconcile_inventory_drift(
+        self,
+        active_server_targets: list[tuple[int, str, str, str, list]],
+        decommissioning_server_ids: set[int],
+        active_only_server_ids: set[int],
+        server_epochs: dict[int, str],
+        sf,
+        *,
+        reconciled_pairs: set[tuple[int, int]] | None = None,
+    ) -> int:
+        """Detect missing active WI UUIDs and stale node-side WI UUIDs across active ru_hubs."""
+        non_decom_targets = [t for t in active_server_targets if t[0] not in decommissioning_server_ids]
+        if not non_decom_targets:
+            return 0
+
+        tasks_by_sub_id, expected_uuid_to_sub_id = await self._collect_active_wi_inventory_truth(sf)
+        expected_active_uuids = set(expected_uuid_to_sub_id.keys())
+        seen_pairs = reconciled_pairs or set()
+        healed_count = 0
+        confirmed_expected_uuids: set[str] | None = None
+
+        for server_id, api_url, api_key, target_epoch, xhttp_locs in non_decom_targets:
+            try:
+                inv_ok, inv_data, inv_err = await self.client.get_inventory(
+                    api_url, api_key, service="white_internet"
+                )
+            except Exception as exc:
+                logger.debug("WI inventory drift check skipped for server %d: %s", server_id, exc)
+                continue
+            if not inv_ok or not isinstance(inv_data, dict) or not isinstance(inv_data.get("inventory"), dict):
+                if inv_err:
+                    logger.debug("WI inventory drift check failed on server %d: %s", server_id, inv_err)
+                continue
+
+            inventory = inv_data["inventory"]
+            expected_inbounds = self._expected_inbound_tags(xhttp_locs)
+            node_active_uuids: set[str] = set()
+            node_healthy_uuids: set[str] = set()
+            for raw_cid, info in inventory.items():
+                if not isinstance(info, dict):
+                    continue
+                cid = str(raw_cid).strip().lower()
+                obs = info.get("observed_state")
+                if obs in ("active", "partial"):
+                    node_active_uuids.add(cid)
+                inb_map = info.get("inbounds") or {}
+                present_tags = {tag for tag, present in inb_map.items() if present} if isinstance(inb_map, dict) else set()
+                inbounds_ok = not expected_inbounds or expected_inbounds.issubset(present_tags)
+                if obs == "active" and info.get("all_inbounds_matched", True) is not False and inbounds_ok:
+                    node_healthy_uuids.add(cid)
+
+            missing_uuids = expected_active_uuids - node_healthy_uuids
+            missing_sub_ids = {
+                expected_uuid_to_sub_id[u]
+                for u in missing_uuids
+                if (expected_uuid_to_sub_id[u], server_id) not in seen_pairs
+            }
+            if missing_sub_ids:
+                logger.info(
+                    "Detected %d WI missing/partial UUIDs (%d subs) on server %d; resyncing.",
+                    len(missing_uuids),
+                    len(missing_sub_ids),
+                    server_id,
+                )
+                repair_tasks = [
+                    self._reconcile_sub_on_server(
+                        server_id,
+                        api_url,
+                        api_key,
+                        target_epoch,
+                        xhttp_locs,
+                        tasks_by_sub_id[sid_sub],
+                        active_only_server_ids,
+                        sf,
+                        server_epochs=server_epochs,
+                    )
+                    for sid_sub in sorted(missing_sub_ids)
+                ]
+                repair_results = await asyncio.gather(*repair_tasks, return_exceptions=True)
+                for res in repair_results:
+                    if isinstance(res, Exception):
+                        logger.error("Error repairing missing WI inventory on server %d: %s", server_id, res, exc_info=res)
+                    elif res is True:
+                        healed_count += 1
+
+            candidate_stale = sorted(node_active_uuids - expected_active_uuids)
+            if candidate_stale:
+                if confirmed_expected_uuids is None:
+                    _, fresh_map = await self._collect_active_wi_inventory_truth(sf)
+                    confirmed_expected_uuids = set(fresh_map.keys())
+                stale_uuids = [u for u in candidate_stale if u not in confirmed_expected_uuids]
+                if stale_uuids:
+                    logger.info(
+                        "Disabling %d stale active WI UUIDs on server %d.",
+                        len(stale_uuids),
+                        server_id,
+                    )
+                for stale_uuid in stale_uuids:
+                    try:
+                        async with self._semaphore:
+                            resp = await self.client.sync_client(
+                                api_url,
+                                api_key,
+                                stale_uuid,
+                                is_active=False,
+                                version=1,
+                                expected_node_epoch=target_epoch,
+                                service="white_internet",
+                            )
+                            res = resp.result if hasattr(resp, "result") else resp[0]
+                            if res == SyncResult.ALREADY_NEWER:
+                                raw_v = (getattr(resp, "raw_data", None) or {}).get("version")
+                                retry_ver = (int(raw_v) if isinstance(raw_v, int) else 1) + 1
+                                retry_resp = await self.client.sync_client(
+                                    api_url,
+                                    api_key,
+                                    stale_uuid,
+                                    is_active=False,
+                                    version=retry_ver,
+                                    expected_node_epoch=target_epoch,
+                                    service="white_internet",
+                                )
+                                res = retry_resp.result if hasattr(retry_resp, "result") else retry_resp[0]
+                            if res == SyncResult.APPLIED:
+                                healed_count += 1
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed disabling stale WI UUID %s on server %d: %s",
+                            stale_uuid[:8],
+                            server_id,
+                            exc,
+                        )
+
+        return healed_count
 
 
 async def white_internet_reconciliation_loop(

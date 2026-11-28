@@ -287,20 +287,23 @@ async def _send_admin_alert_msg(bot: Bot, text: str, reply_markup=None) -> bool:
     return success
 
 
-async def _probe_single_ingress_endpoint(
+async def _probe_http_endpoint(
     session: aiohttp.ClientSession,
-    domain: str,
-    sub_prefix: str,
+    probe_url: str,
+    *,
+    xhttp_mode: bool = False,
 ) -> tuple[bool, str]:
-    """Synthetic HTTP probe for a single White Internet subscription endpoint."""
-    probe_url = f"https://{domain}{sub_prefix}/ping"
+    """Synthetic HTTP probe; for XHTTP routes any non-404 status below 500 confirms origin Xray reachability."""
     for attempt in range(3):
         try:
             async with session.get(
                 probe_url,
                 allow_redirects=False,
             ) as probe_resp:
-                if probe_resp.status == 200:
+                if xhttp_mode:
+                    if 200 <= probe_resp.status < 500 and probe_resp.status != 404:
+                        return (True, str(probe_resp.status))
+                elif probe_resp.status == 200:
                     return (True, "200")
                 if attempt < 2 and probe_resp.status in (502, 503, 504):
                     await asyncio.sleep(INGRESS_RETRY_DELAY * (attempt + 1))
@@ -318,6 +321,60 @@ async def _probe_single_ingress_endpoint(
                     err_msg = type(probe_exc).__name__
             return (False, err_msg)
     return (False, "UNKNOWN")
+
+
+async def _probe_single_ingress_endpoint(
+    session: aiohttp.ClientSession,
+    domain: str,
+    sub_prefix: str,
+) -> tuple[bool, str]:
+    """Synthetic HTTP probe for a single White Internet subscription endpoint."""
+    return await _probe_http_endpoint(session, f"https://{domain}{sub_prefix}/ping", xhttp_mode=False)
+
+
+def _collect_cdn_probe_targets(
+    extra_dict: dict[str, Any],
+    origin_domain: str | None,
+    primary_cdn: str | None,
+    sub_prefix: str,
+) -> list[tuple[str, str, bool]]:
+    """Collect distinct (domain, path, is_xhttp) CDN probe targets for a WI hub."""
+    cdn_domains_map = extra_dict.get("cdn_domains") if isinstance(extra_dict.get("cdn_domains"), dict) else {}
+    yandex_cdn = str(cdn_domains_map.get("cdn_yandex") or primary_cdn or "").strip()
+    turbo_cdn = str(cdn_domains_map.get("cdn_turboflare") or extra_dict.get("turboflare_domain") or "").strip()
+
+    targets: list[tuple[str, str, bool]] = []
+    seen: set[tuple[str, str, bool]] = set()
+
+    def _add(dom: str, path: str, is_xhttp: bool) -> None:
+        clean_dom = str(dom or "").strip()
+        if not clean_dom or clean_dom == origin_domain:
+            return
+        clean_path = "/" + str(path or "").lstrip("/")
+        key = (clean_dom, clean_path, is_xhttp)
+        if key not in seen:
+            seen.add(key)
+            targets.append(key)
+
+    for dom in (primary_cdn or "", yandex_cdn, turbo_cdn):
+        if dom:
+            _add(dom, f"{sub_prefix}/ping", False)
+
+    xhttp_locations = extra_dict.get("xhttp_locations")
+    if isinstance(xhttp_locations, list):
+        probed_cdn_types: set[tuple[str, str]] = set()
+        for loc in xhttp_locations:
+            if not isinstance(loc, dict) or not loc.get("path"):
+                continue
+            cdn_hint = str(loc.get("cdn") or "").strip().lower()
+            cdn_type = "cdn_turboflare" if cdn_hint == "cdn_turboflare" else "cdn_yandex"
+            loc_cdn = turbo_cdn if cdn_type == "cdn_turboflare" else (yandex_cdn or str(primary_cdn or "").strip())
+            if not loc_cdn or (cdn_type, loc_cdn) in probed_cdn_types:
+                continue
+            probed_cdn_types.add((cdn_type, loc_cdn))
+            _add(loc_cdn, str(loc["path"]), True)
+
+    return targets
 
 
 async def _run_topology_sync_with_retry_tracking(context: str) -> None:
@@ -870,6 +927,8 @@ async def check_node_resources_and_alerts(bot: Bot):
         cdn_probe_result: tuple[bool, str] | None = None
         origin_domain: str | None = None
         cdn_domain: str | None = None
+        cdn_probe_domain: str | None = None
+        cdn_probe_endpoint: str | None = None
         raw_sub_prefix = None
         if isinstance(getattr(server, "extra_data", None), dict):
             raw_sub_prefix = server.extra_data.get("sub_path_prefix")
@@ -904,14 +963,42 @@ async def check_node_resources_and_alerts(bot: Bot):
                     if cdn_domain:
                         cdn_domain = str(cdn_domain).strip()
 
-                    if origin_domain and cdn_domain and origin_domain != cdn_domain:
-                        # Dual probe: probe both Origin and CDN in parallel
-                        res_origin, res_cdn = await asyncio.gather(
-                            _probe_single_ingress_endpoint(shared_probe_sess, origin_domain, sub_prefix),
-                            _probe_single_ingress_endpoint(shared_probe_sess, cdn_domain, sub_prefix),
+                    cdn_targets = _collect_cdn_probe_targets(
+                        extra_dict, origin_domain, cdn_domain, sub_prefix
+                    )
+                    if origin_domain and cdn_targets:
+                        # Dual probe: probe Origin and all configured CDN domains/XHTTP routes in parallel
+                        origin_task = _probe_single_ingress_endpoint(
+                            shared_probe_sess, origin_domain, sub_prefix
                         )
-                        origin_probe_result = res_origin
-                        cdn_probe_result = res_cdn
+                        cdn_tasks = [
+                            _probe_http_endpoint(
+                                shared_probe_sess,
+                                f"https://{dom}{path}",
+                                xhttp_mode=is_xhttp,
+                            )
+                            for dom, path, is_xhttp in cdn_targets
+                        ]
+                        probe_results = await asyncio.gather(origin_task, *cdn_tasks)
+                        origin_probe_result = probe_results[0]
+                        cdn_results = probe_results[1:]
+                        failed_cdn_pair = next(
+                            (
+                                (tgt, res)
+                                for tgt, res in zip(cdn_targets, cdn_results, strict=True)
+                                if not res[0]
+                            ),
+                            None,
+                        )
+                        if failed_cdn_pair is not None:
+                            (f_dom, f_path, _), (_, f_detail) = failed_cdn_pair
+                            cdn_probe_domain = f_dom
+                            cdn_probe_endpoint = f_path
+                            cdn_probe_result = (False, f_detail)
+                        else:
+                            cdn_probe_domain = cdn_domain or cdn_targets[0][0]
+                            cdn_probe_endpoint = f"{sub_prefix}/ping"
+                            cdn_probe_result = (True, cdn_results[0][1])
                     else:
                         target_domain = cdn_domain or origin_domain
                         if target_domain:
@@ -1072,7 +1159,9 @@ async def check_node_resources_and_alerts(bot: Bot):
                                         ))
 
                             # 2. Evaluate CDN Delivery (only in dual probe mode when origin is healthy)
-                            if cdn_probe_result is not None and cdn_domain:
+                            effective_cdn_domain = cdn_probe_domain or cdn_domain
+                            effective_cdn_endpoint = cdn_probe_endpoint or f"{sub_prefix}/ping"
+                            if cdn_probe_result is not None and effective_cdn_domain:
                                 cdn_ok, cdn_detail = cdn_probe_result
                                 if origin_ok:
                                     if cdn_ok:
@@ -1100,8 +1189,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                                                     ALERT_CDN_INGRESS_RESTORED.format(
                                                         server_name=safe(server.name),
                                                         server_id=server.id,
-                                                        domain=safe(cdn_domain),
-                                                        endpoint=safe(f"{sub_prefix}/ping"),
+                                                        domain=safe(effective_cdn_domain),
+                                                        endpoint=safe(effective_cdn_endpoint),
                                                     ),
                                                     False,
                                                     None,
@@ -1119,8 +1208,8 @@ async def check_node_resources_and_alerts(bot: Bot):
 
                                         if st.consecutive_cdn_fails < REQUIRED_CDN_FAILS:
                                             logger.info(
-                                                "Xray origin node %s Origin (%s) is healthy (200), but CDN (%s) returned %s (%d/%d fails). Suppressing transient alert.",
-                                                server.id, active_origin_domain, cdn_domain, cdn_detail, st.consecutive_cdn_fails, REQUIRED_CDN_FAILS,
+                                                "Xray origin node %s Origin (%s) is healthy (200), but CDN (%s %s) returned %s (%d/%d fails). Suppressing transient alert.",
+                                                server.id, active_origin_domain, effective_cdn_domain, effective_cdn_endpoint, cdn_detail, st.consecutive_cdn_fails, REQUIRED_CDN_FAILS,
                                             )
                                         elif not has_cdn_problem:
                                             st.cdn_problem = True
@@ -1129,18 +1218,18 @@ async def check_node_resources_and_alerts(bot: Bot):
                                             db_extra["cdn_problem_started_at"] = time.time()
                                             extra_changed = True
                                             logger.warning(
-                                                "Xray origin node %s CDN (%s) persistent failure (%d fails): %s (Origin %s is 200 OK). Sending CDN alert.",
-                                                server.id, cdn_domain, st.consecutive_cdn_fails, cdn_detail, active_origin_domain,
+                                                "Xray origin node %s CDN (%s %s) persistent failure (%d fails): %s (Origin %s is 200 OK). Sending CDN alert.",
+                                                server.id, effective_cdn_domain, effective_cdn_endpoint, st.consecutive_cdn_fails, cdn_detail, active_origin_domain,
                                             )
                                             ingress_alerts_to_send.append((
                                                 "cdn",
                                                 ALERT_CDN_INGRESS_PROBLEM.format(
                                                     server_name=safe(server.name),
                                                     server_id=server.id,
-                                                    domain=safe(cdn_domain),
+                                                    domain=safe(effective_cdn_domain),
                                                     origin_domain=safe(active_origin_domain),
                                                     status_or_err=safe(cdn_detail),
-                                                    endpoint=safe(f"{sub_prefix}/ping"),
+                                                    endpoint=safe(effective_cdn_endpoint),
                                                 ),
                                                 True,
                                                 now_m,
@@ -1155,8 +1244,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                                                     ALERT_CDN_INGRESS_PROBLEM_REMINDER.format(
                                                         server_name=safe(server.name),
                                                         server_id=server.id,
-                                                        domain=safe(cdn_domain),
-                                                        endpoint=safe(f"{sub_prefix}/ping"),
+                                                        domain=safe(effective_cdn_domain),
+                                                        endpoint=safe(effective_cdn_endpoint),
                                                         hours_text=_format_outage_duration(outage_dur),
                                                     ),
                                                     True,
