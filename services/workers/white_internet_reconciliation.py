@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 import logging
+import time
 
 from aiogram import Bot
 from sqlalchemy import and_, func, or_, select
@@ -19,7 +20,7 @@ from config.enums import (
     WhiteInternetStatus,
 )
 from database.connection import session_scope
-from database.models import Server, User, UserDevice, WhiteInternetSubscription
+from database.models import Server, User, WhiteInternetSubscription
 from database.repositories import user_devices_repo, white_internet_repo
 from services.xray_node_client import SyncResult, XrayNodeClient
 from utils.datetime_helpers import now_utc
@@ -28,6 +29,7 @@ from utils.telegram import safe_send_message
 logger = logging.getLogger(__name__)
 
 RECONCILIATION_INTERVAL_SECONDS = 30.0
+INVENTORY_DRIFT_INTERVAL_SECONDS = 600.0
 BATCH_SIZE = 100
 DEFAULT_RECONCILIATION_CONCURRENCY = 5
 
@@ -48,6 +50,8 @@ class WhiteInternetReconciliationWorker:
         self.max_concurrency = max_concurrency
         self._semaphore = asyncio.Semaphore(self.max_concurrency)
         self._sub_locks: dict[int, asyncio.Lock] = {}
+        self._last_inventory_drift_check_mono: float | None = None
+        self._last_checked_server_epochs: dict[int, str] = {}
 
     def _get_sub_lock(self, sub_id: int) -> asyncio.Lock:
         lock = self._sub_locks.get(sub_id)
@@ -132,6 +136,7 @@ class WhiteInternetReconciliationWorker:
         all_server_ids: set[int],
         sf,
         server_epochs: dict[int, str] | None = None,
+        bypass_idempotency: bool = False,
     ) -> bool:
         sub_id = task["sub_id"]
         sub_uuid = task["uuid"]
@@ -145,6 +150,11 @@ class WhiteInternetReconciliationWorker:
         async with self._get_sub_lock(sub_id):
             async with self._semaphore:
                 try:
+                    idempotency_key = (
+                        None
+                        if bypass_idempotency
+                        else f"reconcile:{sub_id}:{server_id}:{target_epoch}:{target_version}:{desired_active}"
+                    )
                     resp = await self.client.sync_client(
                         api_url,
                         api_key,
@@ -152,7 +162,7 @@ class WhiteInternetReconciliationWorker:
                         is_active=desired_active,
                         version=target_version,
                         expected_node_epoch=target_epoch,
-                        idempotency_key=f"reconcile:{sub_id}:{server_id}:{target_epoch}:{target_version}:{desired_active}",
+                        idempotency_key=idempotency_key,
                         service="white_internet",
                     )
 
@@ -460,7 +470,6 @@ class WhiteInternetReconciliationWorker:
                 .limit(BATCH_SIZE)
             )
             subs = (await sess.execute(stmt)).scalars().all()
-            sub_user_ids = list({s.user_id for s in subs if getattr(s, "user_id", None) is not None})
             wi_limit_by_user: dict[int, int] = {}
             for s in subs:
                 uid_val = getattr(s, "user_id", None)
@@ -469,31 +478,12 @@ class WhiteInternetReconciliationWorker:
                 if s.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE):
                     lim = max(1, int(getattr(s, "device_limit", 1) or 1))
                     wi_limit_by_user[int(uid_val)] = max(wi_limit_by_user.get(int(uid_val), 0), lim)
-            active_devs_by_user: dict[int, set[str]] = {}
-            if sub_user_ids:
-                dev_rows = (
-                    await sess.execute(
-                        select(UserDevice.user_id, UserDevice.device_uuid)
-                        .where(
-                            UserDevice.user_id.in_(sub_user_ids),
-                            UserDevice.bi_priority >= 0,
-                        )
-                        .order_by(
-                            UserDevice.user_id.asc(),
-                            UserDevice.bi_priority.desc(),
-                            UserDevice.first_seen_at.asc(),
-                            UserDevice.id.asc(),
-                        )
-                    )
-                ).all()
-                for uid_val, dev_uuid in dev_rows:
-                    if not dev_uuid:
-                        continue
-                    uid_int = int(uid_val)
-                    cap = wi_limit_by_user.get(uid_int, 0)
-                    bucket = active_devs_by_user.setdefault(uid_int, set())
-                    if len(bucket) < cap:
-                        bucket.add(str(dev_uuid).strip().lower())
+            assigned_devs_by_user, _ = await user_devices_repo.partition_bi_device_uuids_by_users(
+                sess, wi_limit_by_user
+            )
+            active_devs_by_user = {
+                uid_int: set(uuids) for uid_int, uuids in assigned_devs_by_user.items()
+            }
             work = [
                 (
                     s.id,
@@ -799,14 +789,24 @@ class WhiteInternetReconciliationWorker:
                     elif r is True:
                         synced_count += 1
 
-        synced_count += await self._reconcile_inventory_drift(
-            active_server_targets,
-            decommissioning_server_ids,
-            active_only_server_ids,
-            server_epochs,
-            sf,
-            reconciled_pairs=reconciled_pairs,
+        non_decom_epochs = {
+            t[0]: t[3] for t in active_server_targets if t[0] not in decommissioning_server_ids
+        }
+        now_mono = time.monotonic()
+        should_check_drift = bool(non_decom_epochs) and (
+            self._last_inventory_drift_check_mono is None
+            or (now_mono - self._last_inventory_drift_check_mono) >= INVENTORY_DRIFT_INTERVAL_SECONDS
+            or non_decom_epochs != self._last_checked_server_epochs
         )
+        if should_check_drift:
+            synced_count += await self._reconcile_inventory_drift(
+                active_server_targets,
+                decommissioning_server_ids,
+                active_only_server_ids,
+                server_epochs,
+                sf,
+                reconciled_pairs=reconciled_pairs,
+            )
         synced_count += await self._reconcile_pending_revocations(
             active_server_targets,
             sf,
@@ -840,29 +840,16 @@ class WhiteInternetReconciliationWorker:
                     .order_by(WhiteInternetSubscription.id.asc())
                 )
             ).scalars().all()
-            user_ids = list({s.user_id for s in active_rows if getattr(s, "user_id", None) is not None})
-            devs_by_user: dict[int, list[str]] = {}
-            if user_ids:
-                dev_rows = (
-                    await sess.execute(
-                        select(UserDevice.user_id, UserDevice.device_uuid)
-                        .where(
-                            UserDevice.user_id.in_(user_ids),
-                            UserDevice.bi_priority >= 0,
-                        )
-                        .order_by(
-                            UserDevice.user_id.asc(),
-                            UserDevice.bi_priority.desc(),
-                            UserDevice.first_seen_at.asc(),
-                            UserDevice.id.asc(),
-                        )
-                    )
-                ).all()
-                for uid_val, dev_uuid in dev_rows:
-                    if dev_uuid:
-                        devs_by_user.setdefault(int(uid_val), []).append(
-                            str(dev_uuid).strip().lower()
-                        )
+            wi_limit_by_user: dict[int, int] = {}
+            for sub in active_rows:
+                uid_val = getattr(sub, "user_id", None)
+                if uid_val is None:
+                    continue
+                lim = max(1, int(getattr(sub, "device_limit", 1) or 1))
+                wi_limit_by_user[int(uid_val)] = max(wi_limit_by_user.get(int(uid_val), 0), lim)
+            devs_by_user, _ = await user_devices_repo.partition_bi_device_uuids_by_users(
+                sess, wi_limit_by_user
+            )
 
         tasks_by_sub_id: dict[int, dict] = {}
         expected_uuid_to_sub_id: dict[str, int] = {}
@@ -904,6 +891,8 @@ class WhiteInternetReconciliationWorker:
         seen_pairs = reconciled_pairs or set()
         healed_count = 0
         confirmed_expected_uuids: set[str] | None = None
+        any_inv_ok = False
+        checked_epochs: dict[int, str] = {}
 
         for server_id, api_url, api_key, target_epoch, xhttp_locs in non_decom_targets:
             try:
@@ -918,6 +907,8 @@ class WhiteInternetReconciliationWorker:
                     logger.debug("WI inventory drift check failed on server %d: %s", server_id, inv_err)
                 continue
 
+            any_inv_ok = True
+            checked_epochs[server_id] = target_epoch
             inventory = inv_data["inventory"]
             expected_inbounds = self._expected_inbound_tags(xhttp_locs)
             node_active_uuids: set[str] = set()
@@ -959,6 +950,7 @@ class WhiteInternetReconciliationWorker:
                         active_only_server_ids,
                         sf,
                         server_epochs=server_epochs,
+                        bypass_idempotency=True,
                     )
                     for sid_sub in sorted(missing_sub_ids)
                 ]
@@ -981,41 +973,64 @@ class WhiteInternetReconciliationWorker:
                         len(stale_uuids),
                         server_id,
                     )
-                for stale_uuid in stale_uuids:
-                    try:
-                        async with self._semaphore:
-                            resp = await self.client.sync_client(
-                                api_url,
-                                api_key,
-                                stale_uuid,
-                                is_active=False,
-                                version=1,
-                                expected_node_epoch=target_epoch,
-                                service="white_internet",
-                            )
-                            res = resp.result if hasattr(resp, "result") else resp[0]
-                            if res == SyncResult.ALREADY_NEWER:
-                                raw_v = (getattr(resp, "raw_data", None) or {}).get("version")
-                                retry_ver = (int(raw_v) if isinstance(raw_v, int) else 1) + 1
-                                retry_resp = await self.client.sync_client(
+                    batch_payload = [
+                        {
+                            "uuid": u,
+                            "is_active": False,
+                            "desired_state": "disabled",
+                            "version": 1,
+                            "expected_node_epoch": target_epoch,
+                            "service": "white_internet",
+                        }
+                        for u in stale_uuids
+                    ]
+                    batch_supported, batch_succeeded, batch_failed = await self.client.batch_sync_clients(
+                        api_url, api_key, batch_payload
+                    )
+                    if batch_supported:
+                        healed_count += len(batch_succeeded)
+                        fallback_stale = [u for u in stale_uuids if u in batch_failed]
+                    else:
+                        fallback_stale = stale_uuids
+                    for stale_uuid in fallback_stale:
+                        try:
+                            async with self._semaphore:
+                                resp = await self.client.sync_client(
                                     api_url,
                                     api_key,
                                     stale_uuid,
                                     is_active=False,
-                                    version=retry_ver,
+                                    version=1,
                                     expected_node_epoch=target_epoch,
                                     service="white_internet",
                                 )
-                                res = retry_resp.result if hasattr(retry_resp, "result") else retry_resp[0]
-                            if res == SyncResult.APPLIED:
-                                healed_count += 1
-                    except Exception as exc:
-                        logger.warning(
-                            "Failed disabling stale WI UUID %s on server %d: %s",
-                            stale_uuid[:8],
-                            server_id,
-                            exc,
-                        )
+                                res = resp.result if hasattr(resp, "result") else resp[0]
+                                if res == SyncResult.ALREADY_NEWER:
+                                    raw_v = (getattr(resp, "raw_data", None) or {}).get("version")
+                                    retry_ver = (int(raw_v) if isinstance(raw_v, int) else 1) + 1
+                                    retry_resp = await self.client.sync_client(
+                                        api_url,
+                                        api_key,
+                                        stale_uuid,
+                                        is_active=False,
+                                        version=retry_ver,
+                                        expected_node_epoch=target_epoch,
+                                        service="white_internet",
+                                    )
+                                    res = retry_resp.result if hasattr(retry_resp, "result") else retry_resp[0]
+                                if res == SyncResult.APPLIED:
+                                    healed_count += 1
+                        except Exception as exc:
+                            logger.warning(
+                                "Failed disabling stale WI UUID %s on server %d: %s",
+                                stale_uuid[:8],
+                                server_id,
+                                exc,
+                            )
+
+        if any_inv_ok:
+            self._last_inventory_drift_check_mono = time.monotonic()
+            self._last_checked_server_epochs = checked_epochs
 
         return healed_count
 

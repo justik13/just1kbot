@@ -964,21 +964,26 @@ async def serve_unified_subscription_feed(
                 else:
                     all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING, "Нажмите ⟳ через 1 минуту"))
                 sync_state = wi_sub.node_sync_state if isinstance(wi_sub.node_sync_state, dict) else {}
-                unsynced_hubs = [
-                    h
-                    for h in wi_hubs
-                    if h.api_url
-                    and h.api_key
-                    and (
-                        not isinstance(sync_state.get(str(h.id)), dict)
-                        or sync_state.get(str(h.id), {}).get("active") is not True
-                        or sync_state.get(str(h.id), {}).get("version") != (wi_sub.desired_version or 1)
+                unsynced_hubs = []
+                for h in wi_hubs:
+                    if not (h.api_url and h.api_key):
+                        continue
+                    sync_entry = sync_state.get(str(h.id))
+                    is_unready = (
+                        not isinstance(sync_entry, dict)
+                        or sync_entry.get("active") is not True
                         or (
-                            h.xray_instance_epoch
-                            and sync_state.get(str(h.id), {}).get("epoch") != h.xray_instance_epoch
+                            bool(h.xray_instance_epoch)
+                            and sync_entry.get("epoch") != h.xray_instance_epoch
+                        )
+                        or (sync_entry.get("version") or 0) <= 0
+                        or (
+                            wi_sub.status != WhiteInternetStatus.ACTIVE
+                            and sync_entry.get("version") != (wi_sub.desired_version or 1)
                         )
                     )
-                ]
+                    if is_unready:
+                        unsynced_hubs.append(h)
                 if device_client_uuid and is_bi_assigned and (is_new_device or unsynced_hubs):
                     if is_new_device:
                         wi_sub.desired_version = (wi_sub.desired_version or 1) + 1

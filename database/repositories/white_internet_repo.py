@@ -522,14 +522,10 @@ async def clear_active_pending_revocations(
         from database.repositories import user_devices_repo
 
         dev_limit = max(0, int(getattr(sub, "device_limit", 1) or 1))
-        devices = await user_devices_repo.list_user_devices(
-            session,
-            int(sub.user_id),
-            wi_device_limit=dev_limit,
+        assigned_by_user, _ = await user_devices_repo.partition_bi_device_uuids_by_users(
+            session, {int(sub.user_id): dev_limit}
         )
-        for dev in devices:
-            if dev.get("is_bi_assigned") and dev.get("device_uuid"):
-                live_uuids.add(str(dev["device_uuid"]).strip().lower())
+        live_uuids.update(assigned_by_user.get(int(sub.user_id), []))
     if not live_uuids:
         return
     new_pending = [u for u in pending if str(u).strip().lower() not in live_uuids]
@@ -548,19 +544,11 @@ async def collect_displaced_wi_device_uuids(
     from database.repositories import user_devices_repo
 
     keep_limit = max(0, int(new_device_limit))
-    devices = await user_devices_repo.list_user_devices(
-        session,
-        int(user_id),
-        wi_device_limit=0,
+    uid_int = int(user_id)
+    _, displaced_by_user = await user_devices_repo.partition_bi_device_uuids_by_users(
+        session, {uid_int: keep_limit}
     )
-    eligible_uuids = [
-        str(d["device_uuid"]).strip().lower()
-        for d in devices
-        if int(d.get("bi_priority") or 0) >= 0 and d.get("device_uuid")
-    ]
-    if len(eligible_uuids) <= keep_limit:
-        return []
-    return eligible_uuids[keep_limit:]
+    return displaced_by_user.get(uid_int, [])
 
 
 async def record_wi_traffic_atomic(

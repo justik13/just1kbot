@@ -332,6 +332,30 @@ async def _probe_single_ingress_endpoint(
     return await _probe_http_endpoint(session, f"https://{domain}{sub_prefix}/ping", xhttp_mode=False)
 
 
+def _collect_xhttp_paths_by_cdn(extra_dict: dict[str, Any]) -> list[tuple[str, str]]:
+    """Collect one representative (cdn_type, normalized_path) pair per configured CDN type."""
+    xhttp_locations = extra_dict.get("xhttp_locations")
+    if not isinstance(xhttp_locations, list):
+        return []
+    result: list[tuple[str, str]] = []
+    seen_types: set[str] = set()
+    for loc in xhttp_locations:
+        if not isinstance(loc, dict) or not loc.get("path"):
+            continue
+        cdn_hint = str(loc.get("cdn") or "").strip().lower()
+        cdn_type = "cdn_turboflare" if cdn_hint == "cdn_turboflare" else "cdn_yandex"
+        if cdn_type in seen_types:
+            continue
+        seen_types.add(cdn_type)
+        result.append((cdn_type, "/" + str(loc["path"]).lstrip("/")))
+    return result
+
+
+def _collect_origin_xhttp_paths(extra_dict: dict[str, Any]) -> list[str]:
+    """Collect distinct representative XHTTP paths served by this node."""
+    return list(dict.fromkeys(path for _, path in _collect_xhttp_paths_by_cdn(extra_dict)))
+
+
 def _collect_cdn_probe_targets(
     extra_dict: dict[str, Any],
     origin_domain: str | None,
@@ -360,19 +384,10 @@ def _collect_cdn_probe_targets(
         if dom:
             _add(dom, f"{sub_prefix}/ping", False)
 
-    xhttp_locations = extra_dict.get("xhttp_locations")
-    if isinstance(xhttp_locations, list):
-        probed_cdn_types: set[tuple[str, str]] = set()
-        for loc in xhttp_locations:
-            if not isinstance(loc, dict) or not loc.get("path"):
-                continue
-            cdn_hint = str(loc.get("cdn") or "").strip().lower()
-            cdn_type = "cdn_turboflare" if cdn_hint == "cdn_turboflare" else "cdn_yandex"
-            loc_cdn = turbo_cdn if cdn_type == "cdn_turboflare" else (yandex_cdn or str(primary_cdn or "").strip())
-            if not loc_cdn or (cdn_type, loc_cdn) in probed_cdn_types:
-                continue
-            probed_cdn_types.add((cdn_type, loc_cdn))
-            _add(loc_cdn, str(loc["path"]), True)
+    for cdn_type, clean_path in _collect_xhttp_paths_by_cdn(extra_dict):
+        loc_cdn = turbo_cdn if cdn_type == "cdn_turboflare" else (yandex_cdn or str(primary_cdn or "").strip())
+        if loc_cdn:
+            _add(loc_cdn, clean_path, True)
 
     return targets
 
@@ -927,6 +942,7 @@ async def check_node_resources_and_alerts(bot: Bot):
         cdn_probe_result: tuple[bool, str] | None = None
         origin_domain: str | None = None
         cdn_domain: str | None = None
+        origin_probe_endpoint: str | None = None
         cdn_probe_domain: str | None = None
         cdn_probe_endpoint: str | None = None
         raw_sub_prefix = None
@@ -967,10 +983,18 @@ async def check_node_resources_and_alerts(bot: Bot):
                         extra_dict, origin_domain, cdn_domain, sub_prefix
                     )
                     if origin_domain and cdn_targets:
-                        # Dual probe: probe Origin and all configured CDN domains/XHTTP routes in parallel
-                        origin_task = _probe_single_ingress_endpoint(
-                            shared_probe_sess, origin_domain, sub_prefix
-                        )
+                        # Dual probe: probe Origin (/ping + XHTTP routes) and all configured CDN targets in parallel
+                        origin_paths: list[tuple[str, bool]] = [(f"{sub_prefix}/ping", False)]
+                        for xp in _collect_origin_xhttp_paths(extra_dict):
+                            origin_paths.append((xp, True))
+                        origin_tasks = [
+                            _probe_http_endpoint(
+                                shared_probe_sess,
+                                f"https://{origin_domain}{path}",
+                                xhttp_mode=is_xhttp,
+                            )
+                            for path, is_xhttp in origin_paths
+                        ]
                         cdn_tasks = [
                             _probe_http_endpoint(
                                 shared_probe_sess,
@@ -979,9 +1003,25 @@ async def check_node_resources_and_alerts(bot: Bot):
                             )
                             for dom, path, is_xhttp in cdn_targets
                         ]
-                        probe_results = await asyncio.gather(origin_task, *cdn_tasks)
-                        origin_probe_result = probe_results[0]
-                        cdn_results = probe_results[1:]
+                        probe_results = await asyncio.gather(*origin_tasks, *cdn_tasks)
+                        origin_results = probe_results[:len(origin_paths)]
+                        cdn_results = probe_results[len(origin_paths):]
+                        failed_origin_pair = next(
+                            (
+                                (op_path, res)
+                                for (op_path, _), res in zip(origin_paths, origin_results, strict=True)
+                                if not res[0]
+                            ),
+                            None,
+                        )
+                        if failed_origin_pair is not None:
+                            f_op_path, (_, f_op_detail) = failed_origin_pair
+                            origin_probe_endpoint = f_op_path
+                            origin_probe_result = (False, f_op_detail)
+                        else:
+                            origin_probe_endpoint = f"{sub_prefix}/ping"
+                            origin_probe_result = (True, origin_results[0][1])
+
                         failed_cdn_pair = next(
                             (
                                 (tgt, res)
@@ -1078,6 +1118,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                         if origin_probe_result is not None:
                             origin_ok, origin_detail = origin_probe_result
                             active_origin_domain = origin_domain or cdn_domain or server.name
+                            effective_origin_endpoint = origin_probe_endpoint or f"{sub_prefix}/ping"
 
                             # 1. Evaluate Origin Ingress
                             if not origin_ok:
@@ -1104,7 +1145,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                             server_id=server.id,
                                             domain=safe(active_origin_domain),
                                             status_or_err=safe(origin_detail),
-                                            endpoint=safe(f"{sub_prefix}/ping"),
+                                            endpoint=safe(effective_origin_endpoint),
                                         ),
                                         True,
                                         now_m,
@@ -1120,7 +1161,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                                 server_name=safe(server.name),
                                                 server_id=server.id,
                                                 domain=safe(active_origin_domain),
-                                                endpoint=safe(f"{sub_prefix}/ping"),
+                                                endpoint=safe(effective_origin_endpoint),
                                                 hours_text=_format_outage_duration(outage_dur),
                                             ),
                                             True,
@@ -1152,7 +1193,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                                 server_name=safe(server.name),
                                                 server_id=server.id,
                                                 domain=safe(active_origin_domain),
-                                                endpoint=safe(f"{sub_prefix}/ping"),
+                                                endpoint=safe(effective_origin_endpoint),
                                             ),
                                             False,
                                             None,
