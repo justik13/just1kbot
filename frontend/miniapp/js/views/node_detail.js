@@ -67,6 +67,9 @@ function _renderTelemetryCard(node) {
     const lastApply = node.last_apply && typeof node.last_apply === "object" ? node.last_apply : null;
 
     const cpuPct = sys && sys.cpu_percent != null ? sys.cpu_percent : null;
+    const cpuLaExtra = sys && sys.load_1m != null && Number.isFinite(Number(sys.load_1m))
+        ? `LA ${Number(sys.load_1m).toFixed(2)}`
+        : "";
     const ramPct = sys && sys.ram_percent != null ? sys.ram_percent : null;
     const diskPct =
         sys && sys.disk_percent != null
@@ -128,7 +131,7 @@ function _renderTelemetryCard(node) {
         String(node.vless_synced_epoch) !== String(node.xray_instance_epoch);
 
     const bars = [
-        _metricBarHtml("CPU", cpuPct),
+        _metricBarHtml("CPU", cpuPct, cpuLaExtra),
         _metricBarHtml("RAM", ramPct),
         _metricBarHtml("Диск", diskPct, diskExtra),
         tl && tl.limit_bytes ? _metricBarHtml("Трафик хостинга", tl.pct, trafficText) : "",
@@ -310,7 +313,7 @@ function _buildDiagnosticsText(node) {
         node.domain ? `Domain: ${node.domain}` : null,
         cdnLine,
         `Fails: total=${node.consecutive_fails || 0}, ingress=${node.consecutive_ingress_fails || 0} (problem=${Boolean(node.ingress_problem)}), cdn=${node.consecutive_cdn_fails || 0} (problem=${Boolean(node.cdn_problem)})`,
-        sys ? `Load: CPU=${sys.cpu_percent ?? "—"}%, RAM=${sys.ram_percent ?? "—"}%, Disk=${sys.disk_percent ?? node.disk_usage?.used_percent ?? "—"}%` : null,
+        sys ? `Load: CPU=${sys.cpu_percent ?? "—"}%, RAM=${sys.ram_percent ?? "—"}%, Disk=${sys.disk_percent ?? node.disk_usage?.used_percent ?? "—"}%${sys.load_1m != null ? `, LA=${sys.load_1m}` : ""}` : null,
         tl ? `Traffic: ${tl.pct ?? 0}% (exceeded=${Boolean(tl.exceeded)}, reset_day=${tl.reset_day ?? "—"})` : null,
         `Epochs: sync=${node.vless_synced_epoch ?? "—"} / core=${node.xray_instance_epoch ?? "—"}`,
         `Last check: ${node.last_successful_check || "—"}`,

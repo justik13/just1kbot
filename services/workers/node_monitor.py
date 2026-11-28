@@ -101,16 +101,17 @@ def _build_v2_extra_patch(
     """Compute changed v2 discovery and health metadata keys without clobbering probe state."""
     base = dict(existing_extra) if isinstance(existing_extra, dict) else {}
     merged = merge_v2_extra_data(base, status_data, health_data)
-    if isinstance(health_data, dict):
-        if isinstance(health_data.get("system_load"), dict):
-            merged["system_load"] = health_data["system_load"]
-        if "cdn_domain" in health_data and health_data["cdn_domain"] is None:
-            merged["cdn_domain"] = ""
-        if "sub_path_prefix" in health_data and not health_data["sub_path_prefix"]:
-            if "sub_path_prefix" in base:
-                merged["sub_path_prefix"] = base["sub_path_prefix"]
-            else:
-                merged.pop("sub_path_prefix", None)
+    for payload in (status_data, health_data):
+        if isinstance(payload, dict):
+            if isinstance(payload.get("system_load"), dict):
+                merged["system_load"] = payload["system_load"]
+            if "cdn_domain" in payload and payload["cdn_domain"] is None:
+                merged["cdn_domain"] = ""
+            if "sub_path_prefix" in payload and not payload["sub_path_prefix"]:
+                if "sub_path_prefix" in base:
+                    merged["sub_path_prefix"] = base["sub_path_prefix"]
+                else:
+                    merged.pop("sub_path_prefix", None)
 
     has_reported_role = (
         (isinstance(status_data, dict) and status_data.get("role") is not None)
@@ -130,6 +131,20 @@ def _build_v2_extra_patch(
         if k in base and k not in merged:
             patch[k] = None
     return patch
+
+
+def apply_v2_extra_patch(
+    existing_extra: dict[str, Any] | None,
+    patch: dict[str, Any],
+) -> dict[str, Any]:
+    """Return a new extra_data dict with a _build_v2_extra_patch diff applied."""
+    extra = dict(existing_extra) if isinstance(existing_extra, dict) else {}
+    for pk, pv in patch.items():
+        if pv is None and pk in ("last_apply", "ssl_cert"):
+            extra.pop(pk, None)
+        else:
+            extra[pk] = pv
+    return extra
 
 
 def _format_outage_duration(seconds: float) -> str:
@@ -1659,14 +1674,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                         extra_patch = _build_v2_extra_patch(
                             updated_srv.extra_data, None, xray_data
                         )
-                        extra = dict(updated_srv.extra_data or {})
+                        extra = apply_v2_extra_patch(updated_srv.extra_data, extra_patch)
                         extra_changed = bool(extra_patch)
-                        if extra_patch:
-                            for pk, pv in extra_patch.items():
-                                if pv is None and pk in ("last_apply", "ssl_cert"):
-                                    extra.pop(pk, None)
-                                else:
-                                    extra[pk] = pv
                         cdn_domains = xray_data.get("cdn_domains")
                         if isinstance(cdn_domains, dict) and not cdn_domains.get("cdn_turboflare") and "turboflare_domain" in extra:
                             extra.pop("turboflare_domain", None)

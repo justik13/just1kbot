@@ -17,6 +17,7 @@ from bot.miniapp.admin_nodes_handlers import (
     api_admin_nodes_lifecycle_handler,
     api_admin_nodes_list_handler,
     api_admin_nodes_patch_handler,
+    api_admin_nodes_refresh_handler,
     api_admin_nodes_toggle_handler,
 )
 from bot.miniapp.admin_ops_handlers import (
@@ -214,6 +215,7 @@ def setup_miniapp_routes(app: web.Application) -> None:
 
     # Admin nodes & users
     app.router.add_get("/api/app/admin/nodes", api_admin_nodes_list_handler)
+    app.router.add_post("/api/app/admin/nodes/refresh", api_admin_nodes_refresh_handler)
     app.router.add_get("/api/app/admin/incy-settings", api_admin_incy_get_handler)
     app.router.add_put("/api/app/admin/incy-settings", api_admin_incy_put_handler)
     app.router.add_post("/api/app/admin/nodes/add", api_admin_nodes_add_handler)
