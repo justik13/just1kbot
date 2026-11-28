@@ -287,13 +287,62 @@ async def _send_admin_alert_msg(bot: Bot, text: str, reply_markup=None) -> bool:
     return success
 
 
+VALID_XHTTP_PROBE_STATUSES = frozenset({200, 400, 405, 409, 413})
+
+
+async def _resolve_host_ipv4s(host: str, dns_cache: dict[str, set[str]]) -> set[str]:
+    """Resolve IPv4 addresses for a domain or literal IPv4 using a per-cycle cache."""
+    clean = str(host or "").strip().lower()
+    if not clean:
+        return set()
+    if clean in dns_cache:
+        return dns_cache[clean]
+    ips: set[str] = set()
+    try:
+        socket.inet_aton(clean)
+        ips.add(clean)
+    except OSError:
+        try:
+            loop = asyncio.get_running_loop()
+            infos = await asyncio.wait_for(
+                loop.getaddrinfo(clean, None, family=socket.AF_INET, type=socket.SOCK_STREAM),
+                timeout=3.0,
+            )
+            for info in infos:
+                addr = info[4][0] if len(info) > 4 and info[4] else None
+                if addr:
+                    ips.add(str(addr))
+        except Exception:
+            ips = set()
+    dns_cache[clean] = ips
+    return ips
+
+
+def _collect_server_cdn_domains(extra_dict: dict[str, Any]) -> set[str]:
+    """Extract normalized CDN domains configured on a node."""
+    domains: set[str] = set()
+    primary = str(extra_dict.get("cdn_domain") or "").strip().lower()
+    if primary:
+        domains.add(primary)
+    turbo_legacy = str(extra_dict.get("turboflare_domain") or "").strip().lower()
+    if turbo_legacy:
+        domains.add(turbo_legacy)
+    cdn_map = extra_dict.get("cdn_domains")
+    if isinstance(cdn_map, dict):
+        for val in cdn_map.values():
+            clean = str(val or "").strip().lower()
+            if clean:
+                domains.add(clean)
+    return domains
+
+
 async def _probe_http_endpoint(
     session: aiohttp.ClientSession,
     probe_url: str,
     *,
     xhttp_mode: bool = False,
 ) -> tuple[bool, str]:
-    """Synthetic HTTP probe; for XHTTP routes any non-404 status below 500 confirms origin Xray reachability."""
+    """Synthetic HTTP probe; for XHTTP routes allow only genuine Xray XHTTP HTTP status codes."""
     for attempt in range(3):
         try:
             async with session.get(
@@ -301,7 +350,7 @@ async def _probe_http_endpoint(
                 allow_redirects=False,
             ) as probe_resp:
                 if xhttp_mode:
-                    if 200 <= probe_resp.status < 500 and probe_resp.status != 404:
+                    if probe_resp.status in VALID_XHTTP_PROBE_STATUSES:
                         return (True, str(probe_resp.status))
                 elif probe_resp.status == 200:
                     return (True, "200")
@@ -333,27 +382,49 @@ async def _probe_single_ingress_endpoint(
 
 
 def _collect_xhttp_paths_by_cdn(extra_dict: dict[str, Any]) -> list[tuple[str, str]]:
-    """Collect one representative (cdn_type, normalized_path) pair per configured CDN type."""
+    """Collect all unique (cdn_type, normalized_path) pairs from xhttp_locations."""
     xhttp_locations = extra_dict.get("xhttp_locations")
     if not isinstance(xhttp_locations, list):
         return []
     result: list[tuple[str, str]] = []
-    seen_types: set[str] = set()
+    seen_pairs: set[tuple[str, str]] = set()
     for loc in xhttp_locations:
         if not isinstance(loc, dict) or not loc.get("path"):
             continue
         cdn_hint = str(loc.get("cdn") or "").strip().lower()
         cdn_type = "cdn_turboflare" if cdn_hint == "cdn_turboflare" else "cdn_yandex"
-        if cdn_type in seen_types:
-            continue
-        seen_types.add(cdn_type)
-        result.append((cdn_type, "/" + str(loc["path"]).lstrip("/")))
+        pair = (cdn_type, "/" + str(loc["path"]).lstrip("/"))
+        if pair not in seen_pairs:
+            seen_pairs.add(pair)
+            result.append(pair)
     return result
 
 
 def _collect_origin_xhttp_paths(extra_dict: dict[str, Any]) -> list[str]:
-    """Collect distinct representative XHTTP paths served by this node."""
+    """Collect all unique XHTTP paths served locally by this node."""
     return list(dict.fromkeys(path for _, path in _collect_xhttp_paths_by_cdn(extra_dict)))
+
+
+async def _probe_origin_paths(
+    session: aiohttp.ClientSession,
+    domain: str,
+    sub_prefix: str,
+    extra_dict: dict[str, Any],
+) -> tuple[str, tuple[bool, str]]:
+    """Probe /ping and all local XHTTP routes on the node domain in parallel."""
+    origin_paths: list[tuple[str, bool]] = [(f"{sub_prefix}/ping", False)]
+    for xp in _collect_origin_xhttp_paths(extra_dict):
+        origin_paths.append((xp, True))
+    results = await asyncio.gather(
+        *[
+            _probe_http_endpoint(session, f"https://{domain}{path}", xhttp_mode=is_xhttp)
+            for path, is_xhttp in origin_paths
+        ]
+    )
+    for (op_path, _), res in zip(origin_paths, results, strict=True):
+        if not res[0]:
+            return op_path, res
+    return f"{sub_prefix}/ping", (True, results[0][1])
 
 
 def _collect_cdn_probe_targets(
@@ -361,35 +432,95 @@ def _collect_cdn_probe_targets(
     origin_domain: str | None,
     primary_cdn: str | None,
     sub_prefix: str,
-) -> list[tuple[str, str, bool]]:
-    """Collect distinct (domain, path, is_xhttp) CDN probe targets for a WI hub."""
+) -> list[tuple[str, str, str, bool]]:
+    """Collect distinct (cdn_type, domain, path, is_xhttp) CDN probe targets for a WI hub."""
     cdn_domains_map = extra_dict.get("cdn_domains") if isinstance(extra_dict.get("cdn_domains"), dict) else {}
-    yandex_cdn = str(cdn_domains_map.get("cdn_yandex") or primary_cdn or "").strip()
+    explicit_yandex = str(cdn_domains_map.get("cdn_yandex") or "").strip()
+    yandex_cdn = str(explicit_yandex or primary_cdn or "").strip()
     turbo_cdn = str(cdn_domains_map.get("cdn_turboflare") or extra_dict.get("turboflare_domain") or "").strip()
 
-    targets: list[tuple[str, str, bool]] = []
-    seen: set[tuple[str, str, bool]] = set()
+    targets: list[tuple[str, str, str, bool]] = []
+    seen_url_keys: set[tuple[str, str, bool]] = set()
+    origin_clean = str(origin_domain or "").strip().lower()
 
-    def _add(dom: str, path: str, is_xhttp: bool) -> None:
+    def _add(cdn_type: str, dom: str, path: str, is_xhttp: bool) -> None:
         clean_dom = str(dom or "").strip()
-        if not clean_dom or clean_dom == origin_domain:
+        if not clean_dom or clean_dom.lower() == origin_clean:
             return
         clean_path = "/" + str(path or "").lstrip("/")
-        key = (clean_dom, clean_path, is_xhttp)
-        if key not in seen:
-            seen.add(key)
-            targets.append(key)
+        url_key = (clean_dom.lower(), clean_path, is_xhttp)
+        if url_key not in seen_url_keys:
+            seen_url_keys.add(url_key)
+            targets.append((cdn_type, clean_dom, clean_path, is_xhttp))
 
     for dom in (primary_cdn or "", yandex_cdn, turbo_cdn):
         if dom:
-            _add(dom, f"{sub_prefix}/ping", False)
+            is_turbo_only = (
+                dom == turbo_cdn
+                and dom != explicit_yandex
+                and (dom != str(primary_cdn or "").strip() or bool(cdn_domains_map.get("cdn_turboflare") == dom or extra_dict.get("turboflare_domain") == dom))
+            )
+            _add("cdn_turboflare" if is_turbo_only else "cdn_yandex", dom, f"{sub_prefix}/ping", False)
 
     for cdn_type, clean_path in _collect_xhttp_paths_by_cdn(extra_dict):
         loc_cdn = turbo_cdn if cdn_type == "cdn_turboflare" else (yandex_cdn or str(primary_cdn or "").strip())
         if loc_cdn:
-            _add(loc_cdn, clean_path, True)
+            _add(cdn_type, loc_cdn, clean_path, True)
 
     return targets
+
+
+def _evaluate_cdn_probe_results(
+    server_id: int,
+    origin_ok: bool,
+    cdn_targets: list[tuple[str, str, str, bool]],
+    cdn_results: list[tuple[bool, str]],
+    cdn_domain_hubs: dict[str, set[int]],
+    primary_cdn: str | None,
+    sub_prefix: str,
+) -> tuple[str | None, str | None, tuple[bool, str] | None, bool]:
+    """Evaluate CDN probe results without falsely poisoning a hub on warm-standby shared CDNs."""
+    by_dom: dict[str, list[tuple[tuple[str, str, str, bool], tuple[bool, str]]]] = {}
+    for tgt, res in zip(cdn_targets, cdn_results, strict=True):
+        by_dom.setdefault(tgt[1].lower(), []).append((tgt, res))
+
+    yandex_items = [pair for pair in zip(cdn_targets, cdn_results, strict=True) if pair[0][0] == "cdn_yandex"]
+    yandex_healthy = bool(yandex_items) and all(res[0] for _, res in yandex_items)
+
+    active_failures: list[tuple[tuple[str, str, str, bool], tuple[bool, str]]] = []
+    passing_items: list[tuple[tuple[str, str, str, bool], tuple[bool, str]]] = []
+    ignored_standby_domains: list[str] = []
+
+    for dom_key, items in by_dom.items():
+        failed = [(t, r) for t, r in items if not r[0]]
+        if not failed:
+            passing_items.extend(items)
+            continue
+
+        is_shared_cdn = len(cdn_domain_hubs.get(dom_key, ())) > 1
+        ping_passed = any((not t[3]) and r[0] for t, r in items)
+        only_xhttp_404 = all(t[3] and r[1] == "404" for t, r in failed)
+        shared_secondary_while_yandex_ok = is_shared_cdn and yandex_healthy and all(t[0] != "cdn_yandex" for t, _ in failed)
+
+        if origin_ok and is_shared_cdn and ((ping_passed and only_xhttp_404) or shared_secondary_while_yandex_ok):
+            ignored_standby_domains.append(items[0][0][1])
+            continue
+        active_failures.extend(failed)
+
+    if ignored_standby_domains:
+        logger.info(
+            "Node %d local origin XHTTP healthy; ignoring shared standby CDN route mismatch for %s.",
+            server_id,
+            ",".join(ignored_standby_domains),
+        )
+
+    if active_failures:
+        (_, f_dom, f_path, _), (_, f_detail) = active_failures[0]
+        return f_dom, f_path, (False, f_detail), False
+    if passing_items:
+        (_, p_dom, _, _), (_, p_detail) = passing_items[0]
+        return primary_cdn or p_dom, f"{sub_prefix}/ping", (True, p_detail), False
+    return None, None, None, bool(ignored_standby_domains)
 
 
 async def _run_topology_sync_with_retry_tracking(context: str) -> None:
@@ -827,6 +958,50 @@ async def check_node_resources_and_alerts(bot: Bot):
                 eu_hubs_by_domain[_dom] = _srv
             if _srv.is_active and getattr(_srv, "lifecycle_status", None) in (None, ServerLifecycleStatus.ACTIVE):
                 all_enabled_eu_ids.add(_srv.id)
+
+    wi_hub_origin_hosts: dict[int, set[str]] = {}
+    cdn_domain_hubs: dict[str, set[int]] = {}
+    all_wi_dns_hosts: set[str] = set()
+    for _srv in servers:
+        if not getattr(_srv, "is_active", False) or getattr(_srv, "lifecycle_status", None) not in (
+            None,
+            ServerLifecycleStatus.ACTIVE,
+        ):
+            continue
+        _role = get_server_role(_srv)
+        if _role in ("eu_hub", "exit_node"):
+            continue
+        _extra = _srv.extra_data if isinstance(getattr(_srv, "extra_data", None), dict) else {}
+        _is_wi_cand = (
+            _role == "ru_hub"
+            or WHITE_INTERNET_CAPABILITY in (getattr(_srv, "capabilities", None) or [])
+            or bool(_extra.get("cdn_domain"))
+            or bool(_extra.get("cdn_domains"))
+        )
+        if not _is_wi_cand:
+            continue
+        _hosts: set[str] = set()
+        for _hval in (_extra.get("domain"), _extract_domain(_srv), _extract_ipv4(_srv)):
+            if isinstance(_hval, str) and _hval.strip():
+                _hosts.add(_hval.strip().lower())
+        if getattr(_srv, "api_url", None):
+            _api_host = urlsplit(str(_srv.api_url)).hostname
+            if _api_host and _api_host != "localhost":
+                _hosts.add(_api_host.strip().lower())
+        wi_hub_origin_hosts[_srv.id] = _hosts
+        all_wi_dns_hosts.update(_hosts)
+        for _cdom in _collect_server_cdn_domains(_extra):
+            cdn_domain_hubs.setdefault(_cdom, set()).add(_srv.id)
+            all_wi_dns_hosts.add(_cdom)
+
+    dns_cache: dict[str, set[str]] = {}
+    if all_wi_dns_hosts:
+        await asyncio.gather(*(_resolve_host_ipv4s(h, dns_cache) for h in sorted(all_wi_dns_hosts)))
+    hub_origin_ips: dict[int, set[str]] = {
+        sid: set().union(*(dns_cache.get(h, set()) for h in hosts))
+        for sid, hosts in wi_hub_origin_hosts.items()
+    }
+
     probe_timeout = aiohttp.ClientTimeout(
         total=INGRESS_PROBE_TOTAL_TIMEOUT,
         connect=INGRESS_PROBE_CONNECT_TIMEOUT,
@@ -940,6 +1115,7 @@ async def check_node_resources_and_alerts(bot: Bot):
         # Сбои на синтетическом эндпоинте не аффектят статус ядра и выполняются независимо.
         origin_probe_result: tuple[bool, str] | None = None
         cdn_probe_result: tuple[bool, str] | None = None
+        cdn_standby_cleared = False
         origin_domain: str | None = None
         cdn_domain: str | None = None
         origin_probe_endpoint: str | None = None
@@ -979,71 +1155,73 @@ async def check_node_resources_and_alerts(bot: Bot):
                     if cdn_domain:
                         cdn_domain = str(cdn_domain).strip()
 
-                    cdn_targets = _collect_cdn_probe_targets(
+                    raw_cdn_targets = _collect_cdn_probe_targets(
                         extra_dict, origin_domain, cdn_domain, sub_prefix
                     )
+                    my_ips = hub_origin_ips.get(server.id, set())
+                    other_hub_ips: set[str] = set()
+                    for sid_other, ips_other in hub_origin_ips.items():
+                        if sid_other != server.id:
+                            other_hub_ips.update(ips_other)
+                    cdn_targets: list[tuple[str, str, str, bool]] = []
+                    skipped_standby_cdns: set[str] = set()
+                    for tgt in raw_cdn_targets:
+                        _, t_dom, _, _ = tgt
+                        dom_ips = dns_cache.get(t_dom.lower(), set())
+                        if dom_ips and (dom_ips & other_hub_ips) and not (dom_ips & my_ips):
+                            skipped_standby_cdns.add(t_dom)
+                            continue
+                        cdn_targets.append(tgt)
+                    if skipped_standby_cdns:
+                        logger.debug(
+                            "Node %d skipping warm-standby CDN target(s) %s (DNS points to another hub).",
+                            server.id,
+                            ",".join(sorted(skipped_standby_cdns)),
+                        )
+
                     if origin_domain and cdn_targets:
-                        # Dual probe: probe Origin (/ping + XHTTP routes) and all configured CDN targets in parallel
-                        origin_paths: list[tuple[str, bool]] = [(f"{sub_prefix}/ping", False)]
-                        for xp in _collect_origin_xhttp_paths(extra_dict):
-                            origin_paths.append((xp, True))
-                        origin_tasks = [
-                            _probe_http_endpoint(
-                                shared_probe_sess,
-                                f"https://{origin_domain}{path}",
-                                xhttp_mode=is_xhttp,
-                            )
-                            for path, is_xhttp in origin_paths
-                        ]
+                        # Dual probe: probe local Origin (/ping + all XHTTP routes) and active CDN targets in parallel
                         cdn_tasks = [
                             _probe_http_endpoint(
                                 shared_probe_sess,
                                 f"https://{dom}{path}",
                                 xhttp_mode=is_xhttp,
                             )
-                            for dom, path, is_xhttp in cdn_targets
+                            for _, dom, path, is_xhttp in cdn_targets
                         ]
-                        probe_results = await asyncio.gather(*origin_tasks, *cdn_tasks)
-                        origin_results = probe_results[:len(origin_paths)]
-                        cdn_results = probe_results[len(origin_paths):]
-                        failed_origin_pair = next(
-                            (
-                                (op_path, res)
-                                for (op_path, _), res in zip(origin_paths, origin_results, strict=True)
-                                if not res[0]
-                            ),
-                            None,
+                        (origin_probe_endpoint, origin_probe_result), *cdn_results = await asyncio.gather(
+                            _probe_origin_paths(shared_probe_sess, origin_domain, sub_prefix, extra_dict),
+                            *cdn_tasks,
                         )
-                        if failed_origin_pair is not None:
-                            f_op_path, (_, f_op_detail) = failed_origin_pair
-                            origin_probe_endpoint = f_op_path
-                            origin_probe_result = (False, f_op_detail)
-                        else:
-                            origin_probe_endpoint = f"{sub_prefix}/ping"
-                            origin_probe_result = (True, origin_results[0][1])
-
-                        failed_cdn_pair = next(
-                            (
-                                (tgt, res)
-                                for tgt, res in zip(cdn_targets, cdn_results, strict=True)
-                                if not res[0]
-                            ),
-                            None,
+                        (
+                            cdn_probe_domain,
+                            cdn_probe_endpoint,
+                            cdn_probe_result,
+                            cdn_standby_cleared,
+                        ) = _evaluate_cdn_probe_results(
+                            server.id,
+                            origin_probe_result[0],
+                            cdn_targets,
+                            cdn_results,
+                            cdn_domain_hubs,
+                            cdn_domain,
+                            sub_prefix,
                         )
-                        if failed_cdn_pair is not None:
-                            (f_dom, f_path, _), (_, f_detail) = failed_cdn_pair
-                            cdn_probe_domain = f_dom
-                            cdn_probe_endpoint = f_path
-                            cdn_probe_result = (False, f_detail)
-                        else:
-                            cdn_probe_domain = cdn_domain or cdn_targets[0][0]
-                            cdn_probe_endpoint = f"{sub_prefix}/ping"
-                            cdn_probe_result = (True, cdn_results[0][1])
+                    elif origin_domain:
+                        origin_probe_endpoint, origin_probe_result = await _probe_origin_paths(
+                            shared_probe_sess, origin_domain, sub_prefix, extra_dict
+                        )
+                        cdn_probe_result = None
+                        cdn_standby_cleared = bool(skipped_standby_cdns) and origin_probe_result[0]
                     else:
-                        target_domain = cdn_domain or origin_domain
+                        target_domain = (
+                            cdn_targets[0][1]
+                            if cdn_targets
+                            else (cdn_domain if cdn_domain and cdn_domain not in skipped_standby_cdns else None)
+                        )
                         if target_domain:
-                            origin_probe_result = await _probe_single_ingress_endpoint(
-                                shared_probe_sess, target_domain, sub_prefix
+                            origin_probe_endpoint, origin_probe_result = await _probe_origin_paths(
+                                shared_probe_sess, target_domain, sub_prefix, extra_dict
                             )
                             cdn_probe_result = None
             except Exception as outer_probe_exc:
@@ -1292,6 +1470,23 @@ async def check_node_resources_and_alerts(bot: Bot):
                                                     True,
                                                     now_m,
                                                 ))
+                            elif cdn_standby_cleared and origin_ok and (
+                                has_cdn_problem
+                                or st.consecutive_cdn_fails != 0
+                                or db_extra.get("consecutive_cdn_fails", 0) != 0
+                                or "cdn_problem" in db_extra
+                                or "cdn_problem_started_at" in db_extra
+                            ):
+                                st.cdn_problem = False
+                                st.consecutive_cdn_fails = 0
+                                st.consecutive_cdn_successes = 0
+                                st.cdn_problem_started_at = None
+                                st.last_cdn_reminder_at = None
+                                db_extra.pop("cdn_problem", None)
+                                db_extra.pop("cdn_problem_started_at", None)
+                                db_extra["consecutive_cdn_fails"] = 0
+                                db_extra["consecutive_cdn_successes"] = 0
+                                extra_changed = True
 
                         if extra_changed and fresh_server:
                             merged_extra = dict(fresh_server.extra_data or {})

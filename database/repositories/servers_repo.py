@@ -301,10 +301,13 @@ def has_server_cdn_problem(server: Server) -> bool:
     return bool(extra.get("cdn_problem") or extra.get("cdn_problem_started_at"))
 
 
-def _server_load_score(server: Server) -> tuple[bool, float, int]:
+def server_priority_sort_key(server: Server) -> tuple[bool, float, int]:
     """Sort key for servers: healthy ingress/CDN first, lower load score, server.id tie-breaker."""
     has_probe_issue = has_server_ingress_problem(server) or has_server_cdn_problem(server)
     return (has_probe_issue, get_server_load_score(server), int(server.id or 0))
+
+
+_server_load_score = server_priority_sort_key
 
 
 def _is_wi_hub_eligible(server: Server) -> bool:
@@ -330,7 +333,7 @@ async def get_wi_capable_ru_hubs(session: AsyncSession) -> list[Server]:
         )
     ).all()
     eligible = [srv for srv in candidates if _is_wi_hub_eligible(srv)]
-    eligible.sort(key=_server_load_score)
+    eligible.sort(key=server_priority_sort_key)
     return eligible
 
 

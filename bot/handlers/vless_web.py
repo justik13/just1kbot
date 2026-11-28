@@ -935,13 +935,7 @@ async def serve_unified_subscription_feed(
                     ):
                         ready_hubs.append(hub)
                 if ready_hubs:
-                    ready_hubs.sort(
-                        key=lambda s: (
-                            servers_repo.has_server_ingress_problem(s) or servers_repo.has_server_cdn_problem(s),
-                            servers_repo.get_server_load_score(s),
-                            int(s.id or 0),
-                        )
-                    )
+                    ready_hubs.sort(key=servers_repo.server_priority_sort_key)
                     cdn_label_mode = str(await get_system_setting(session, "bi_cdn_label_mode", "name") or "name")
                     cdn_yandex_label = str(await get_system_setting(session, "bi_cdn_yandex_label", "Yandex") or "Yandex")
                     cdn_turboflare_label = str(await get_system_setting(session, "bi_cdn_turboflare_label", "Turboflare") or "Turboflare")
@@ -977,10 +971,6 @@ async def serve_unified_subscription_feed(
                             and sync_entry.get("epoch") != h.xray_instance_epoch
                         )
                         or (sync_entry.get("version") or 0) <= 0
-                        or (
-                            wi_sub.status != WhiteInternetStatus.ACTIVE
-                            and sync_entry.get("version") != (wi_sub.desired_version or 1)
-                        )
                     )
                     if is_unready:
                         unsynced_hubs.append(h)
