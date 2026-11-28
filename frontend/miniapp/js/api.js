@@ -74,6 +74,11 @@ export const api = {
             body: JSON.stringify(payload),
         }),
     listNodes: () => requestJson("/api/app/admin/nodes"),
+    refreshNodes: () =>
+        requestJson("/api/app/admin/nodes/refresh", {
+            method: "POST",
+            timeoutMs: 15000,
+        }),
     addNode: (payload) =>
         requestJson("/api/app/admin/nodes/add", {
             method: "POST",

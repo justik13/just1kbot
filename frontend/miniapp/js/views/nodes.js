@@ -4,6 +4,7 @@ import {
     formatRelativeTime,
     healthChipInfo,
     openModal,
+    parseDate,
     renderCountryFlagField,
     renderFlagHtml,
     roleLabel,
@@ -12,8 +13,10 @@ import {
     withButtonLoading,
 } from "../ui.js?v=2.8.0";
 
+const _REFRESH_ICON = `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`;
+const _ROLE_ORDER = { ru_hub: 0, eu_hub: 1, exit_node: 2 };
+
 let currentFilter = "all";
-let lastReloadedAt = null;
 let _subSettingsReqId = 0;
 
 function _isLastApplyFailed(node) {
@@ -47,6 +50,14 @@ function _isProblemNode(node) {
     }
     if (_isLastApplyFailed(node)) {
         return true;
+    }
+    const sys = node.system_load && typeof node.system_load === "object" ? node.system_load : null;
+    if (sys) {
+        const cpu = sys.cpu_percent != null ? Number(sys.cpu_percent) : 0;
+        const ram = sys.ram_percent != null ? Number(sys.ram_percent) : 0;
+        if (Math.max(Number.isFinite(cpu) ? cpu : 0, Number.isFinite(ram) ? ram : 0) >= 85) {
+            return true;
+        }
     }
     return false;
 }
@@ -388,6 +399,9 @@ function _nodeScopeBadges(node) {
         if (!hasStd && !hasBi) badges.push(`<span class="chip chip-muted">Скрыта</span>`);
         return badges.join("");
     }
+    if (node.role === "eu_hub") {
+        return `<span class="chip chip-muted">Мост</span>`;
+    }
     const caps = Array.isArray(node.capabilities) ? node.capabilities : [];
     const links = node.links && typeof node.links === "object" ? node.links : {};
     const hasStd = caps.includes("vless") || caps.includes("standard") || Boolean(links.standard && Object.keys(links.standard).length);
@@ -456,14 +470,26 @@ function _nodeDiagnosticBadges(node) {
     }
     const sys = node.system_load && typeof node.system_load === "object" ? node.system_load : null;
     if (sys && (sys.cpu_percent != null || sys.ram_percent != null)) {
-        const cpu = sys.cpu_percent != null ? Math.round(Number(sys.cpu_percent)) : null;
-        const ram = sys.ram_percent != null ? Math.round(Number(sys.ram_percent)) : null;
+        const formatPct = (val) => {
+            const num = Number(val);
+            if (!Number.isFinite(num)) return "—";
+            return num < 10 ? num.toFixed(1).replace(/\.0$/, "") : String(Math.round(num));
+        };
+        const cpu = sys.cpu_percent != null ? Number(sys.cpu_percent) : null;
+        const ram = sys.ram_percent != null ? Number(sys.ram_percent) : null;
         const maxLoad = Math.max(cpu ?? 0, ram ?? 0);
         const cls = maxLoad >= 95 ? "chip-err" : maxLoad >= 85 ? "chip-warn" : "chip-muted";
         const parts = [];
-        if (cpu !== null) parts.push(`CPU ${cpu}%`);
-        if (ram !== null) parts.push(`RAM ${ram}%`);
+        if (cpu !== null) parts.push(`CPU ${formatPct(cpu)}%`);
+        if (ram !== null) parts.push(`RAM ${formatPct(ram)}%`);
         badges.push(`<span class="chip ${cls}">${parts.join(" · ")}</span>`);
+        if (sys.load_1m != null && Number.isFinite(Number(sys.load_1m))) {
+            const la = Number(sys.load_1m);
+            const cores = Math.max(1, Number(sys.cpu_cores || 1));
+            if (la >= cores * 0.85) {
+                badges.push(`<span class="chip chip-muted">LA ${la.toFixed(2)}</span>`);
+            }
+        }
     }
     const tl = node.traffic_limit && typeof node.traffic_limit === "object" ? node.traffic_limit : null;
     if (tl && Number(tl.pct || 0) >= 80) {
@@ -498,13 +524,22 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
             : currentFilter === "problems"
                 ? problemNodes
                 : nodes.filter((n) => n.role === currentFilter);
-    const filtered = [...filteredRaw].sort(
-        (a, b) => Number(_isProblemNode(b)) - Number(_isProblemNode(a))
-    );
+    const filtered = [...filteredRaw].sort((a, b) => {
+        const probDiff = Number(_isProblemNode(b)) - Number(_isProblemNode(a));
+        if (probDiff !== 0) return probDiff;
+        const roleDiff = (_ROLE_ORDER[a.role] ?? 3) - (_ROLE_ORDER[b.role] ?? 3);
+        if (roleDiff !== 0) return roleDiff;
+        return Number(a.id || 0) - Number(b.id || 0);
+    });
 
-    const reloadLabel = lastReloadedAt
-        ? `Обновлено в ${lastReloadedAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`
-        : "Обновить список";
+    const latestCheckDate = nodes.reduce((latest, n) => {
+        const dt = parseDate(n.last_successful_check);
+        if (!dt) return latest;
+        return !latest || dt.getTime() > latest.getTime() ? dt : latest;
+    }, null);
+    const pollStatusLabel = latestCheckDate
+        ? `Опрос нод: ${formatRelativeTime(latestCheckDate)}`
+        : "Ноды ещё не опрашивались";
 
     root.innerHTML = `
         <section class="stats-strip">
@@ -515,19 +550,22 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
         </section>
 
         <section class="card">
-            <div class="row" style="flex-wrap:wrap; gap:8px;">
-                <h2 class="card-title">Список нод</h2>
-                <div class="actions-row" style="gap:8px;">
+            <div class="row" style="flex-wrap:wrap; gap:8px; align-items:center;">
+                <div class="nodes-head-title">
+                    <h2 class="card-title">Список нод</h2>
+                    <span class="meta-text">${escapeHtml(pollStatusLabel)}</span>
+                </div>
+                <div class="actions-row" style="gap:8px; flex-shrink:0;">
                     <button id="addNodeOpenBtn" type="button" class="btn btn-sm btn-primary">+ Добавить</button>
-                    <button id="reloadNodesBtn" type="button" class="btn btn-sm">${escapeHtml(reloadLabel)}</button>
+                    <button id="reloadNodesBtn" type="button" class="btn btn-sm">${_REFRESH_ICON}<span>Обновить</span></button>
                 </div>
             </div>
-            <div class="filter-pills">
+            <div class="filter-pills nodes-filter-pills">
                 <button type="button" class="pill-btn ${currentFilter === "all" ? "active" : ""}" data-filter="all" aria-pressed="${currentFilter === "all" ? "true" : "false"}">Все (${counts.all})</button>
                 <button type="button" class="pill-btn ${currentFilter === "problems" ? "active" : ""}" data-filter="problems" aria-pressed="${currentFilter === "problems" ? "true" : "false"}">Проблемы (${counts.problems})</button>
                 <button type="button" class="pill-btn ${currentFilter === "ru_hub" ? "active" : ""}" data-filter="ru_hub" aria-pressed="${currentFilter === "ru_hub" ? "true" : "false"}">RU Hub (${counts.ru_hub})</button>
                 <button type="button" class="pill-btn ${currentFilter === "eu_hub" ? "active" : ""}" data-filter="eu_hub" aria-pressed="${currentFilter === "eu_hub" ? "true" : "false"}">EU Hub (${counts.eu_hub})</button>
-                <button type="button" class="pill-btn ${currentFilter === "exit_node" ? "active" : ""}" data-filter="exit_node" aria-pressed="${currentFilter === "exit_node" ? "true" : "false"}">Exit Node (${counts.exit_node})</button>
+                <button type="button" class="pill-btn ${currentFilter === "exit_node" ? "active" : ""}" data-filter="exit_node" aria-pressed="${currentFilter === "exit_node" ? "true" : "false"}">Exit (${counts.exit_node})</button>
             </div>
             <div id="nodesListContainer" class="nodes-list"></div>
         </section>
@@ -537,19 +575,28 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
         _openAddNodeModal(onReload, onSelectNode);
     });
 
-    root.querySelector("#reloadNodesBtn").addEventListener("click", async (e) => {
-        const btn = e.currentTarget;
-        await withButtonLoading(btn, "Обновление...", async () => {
+    const reloadBtn = root.querySelector("#reloadNodesBtn");
+    if (reloadBtn) {
+        let reloadInFlight = false;
+        reloadBtn.addEventListener("click", async () => {
+            if (reloadInFlight) return;
+            reloadInFlight = true;
+            reloadBtn.disabled = true;
+            reloadBtn.setAttribute("aria-busy", "true");
+            const labelEl = reloadBtn.querySelector("span");
+            if (labelEl) labelEl.textContent = "Опрос...";
             try {
-                const reloaded = await onReload();
-                if (reloaded !== false) {
-                    lastReloadedAt = new Date();
-                }
+                await onReload({ probe: true });
             } catch (err) {
                 showToast(err.message || "Не удалось обновить список", "error");
+            } finally {
+                reloadInFlight = false;
+                reloadBtn.disabled = false;
+                reloadBtn.removeAttribute("aria-busy");
+                if (labelEl) labelEl.textContent = "Обновить";
             }
         });
-    });
+    }
 
     root.querySelectorAll("[data-filter]").forEach((btn) => {
         btn.addEventListener("click", () => {
@@ -573,23 +620,27 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
         card.type = "button";
         card.className = "node-card node-card-compact card-btn";
         card.innerHTML = `
-            <span class="row" style="align-items:center;">
+            <span class="row" style="align-items:center; gap:8px;">
                 <span class="node-compact-title">
                     ${renderFlagHtml(node.country_flag || node.location_code || "", 20)}
-                    <span style="font-weight:600; font-size:14px;">${escapeHtml(node.name)}</span>
-                    <span class="meta-text">#${node.id}</span>
+                    <span class="node-compact-name">${escapeHtml(node.name)}</span>
+                    <span class="meta-text" style="flex-shrink:0;">#${node.id}</span>
                 </span>
-                <span class="row" style="gap:8px; align-items:center;">
-                    <span class="chip chip-muted">${escapeHtml(roleLabel(node.role))}</span>
+                <span class="row" style="gap:6px; align-items:center; flex-shrink:0; width:auto;">
                     <span class="chip ${health.cls}">${escapeHtml(health.text)}</span>
                     <span class="node-chevron" aria-hidden="true">›</span>
                 </span>
             </span>
-            <span class="row meta-text">
-                <span class="mono">${escapeHtml(node.domain || node.api_url)}</span>
+            <span class="row meta-text" style="gap:8px; align-items:center;">
+                <span class="node-domain-line"><span class="node-role-inline">${escapeHtml(roleLabel(node.role))}</span> · <span class="mono">${escapeHtml(node.domain || node.api_url)}</span></span>
                 <span>${health.text === "Отключена" ? escapeHtml(checkText) : `${node.is_active ? "● " : ""}${escapeHtml(checkText)}`}</span>
             </span>
-            ${scopeBadges || diagBadges ? `<span class="filter-pills">${scopeBadges}${diagBadges}</span>` : ""}
+            ${scopeBadges || diagBadges ? `
+                <span class="nodes-badges-row">
+                    ${scopeBadges ? `<span class="nodes-badges-group">${scopeBadges}</span>` : ""}
+                    ${diagBadges ? `<span class="nodes-badges-group">${diagBadges}</span>` : ""}
+                </span>
+            ` : ""}
         `;
 
         card.addEventListener("click", () => {

@@ -312,6 +312,71 @@ async def list_nodes(session: AsyncSession) -> list[dict[str, Any]]:
     return [serialize_server_node(s) for s in servers]
 
 
+async def refresh_nodes() -> list[dict[str, Any]]:
+    """Probe reachable v2 nodes outside DB transaction, persist fresh telemetry, and return node list."""
+    async with session_scope() as session:
+        servers = await get_all_servers(session)
+        targets = [
+            (int(s.id), str(s.api_url), str(s.api_key))
+            for s in servers
+            if s.api_url and s.api_key
+        ]
+
+    if not targets:
+        async with session_scope() as session:
+            return await list_nodes(session)
+
+    sem = asyncio.Semaphore(6)
+
+    async def _probe_one(
+        client: XrayNodeClient, server_id: int, api_url: str, api_key: str
+    ) -> tuple[int, bool, dict[str, Any] | None, dict[str, Any] | None]:
+        async with sem:
+            try:
+                if not await is_safe_url(api_url):
+                    return server_id, False, None, None
+                health_ok, _epoch, health_data = await client.check_health(api_url, api_key)
+                if isinstance(health_data, dict):
+                    return server_id, bool(health_ok), health_data, None
+                status_ok, status_data, _err = await client.get_node_status(api_url, api_key)
+                return server_id, bool(status_ok), None, status_data if isinstance(status_data, dict) else None
+            except Exception as exc:
+                logger.debug("Live node refresh probe failed for server %d: %s", server_id, exc)
+                return server_id, False, None, None
+
+    async with XrayNodeClient(timeout=5.0, max_retries=0) as client:
+        results = await asyncio.gather(
+            *(_probe_one(client, sid, url, key) for sid, url, key in targets),
+            return_exceptions=False,
+        )
+
+    async with session_scope() as session:
+        for server_id, probe_ok, health_data, status_data in results:
+            payload = health_data if isinstance(health_data, dict) else status_data
+            if not isinstance(payload, dict):
+                continue
+            srv = await get_server_by_id(session, server_id, for_update=True)
+            if srv is None:
+                continue
+
+            merged_extra = merge_v2_extra_data(srv.extra_data, status_data, health_data)
+            sys_load = payload.get("system_load")
+            if isinstance(sys_load, dict):
+                merged_extra["system_load"] = sys_load
+
+            update_kwargs: dict[str, Any] = {"extra_data": merged_extra}
+            if payload.get("role") or payload.get("capabilities"):
+                derived_caps = derive_v2_capabilities(None, payload)
+                if derived_caps and sorted(derived_caps) != sorted(srv.capabilities or []):
+                    update_kwargs["capabilities"] = derived_caps
+            if probe_ok:
+                update_kwargs["last_successful_check"] = now_utc()
+
+            await update_server(session, srv, **update_kwargs)
+
+        return await list_nodes(session)
+
+
 async def _ensure_unique_exit_location_code(
     session: AsyncSession,
     server_id: int,

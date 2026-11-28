@@ -631,13 +631,13 @@ async function _renderAdminView(options = {}) {
     }
 }
 
-async function _reloadNodesAndRender({ skipRender = false, removeNodeId = null } = {}) {
+async function _reloadNodesAndRender({ skipRender = false, removeNodeId = null, probe = false } = {}) {
     const seq = _tabSwitchSeq;
     if (removeNodeId != null) {
         appState.nodes = appState.nodes.filter((n) => n.id !== removeNodeId);
     }
     try {
-        const res = await api.listNodes();
+        const res = probe ? await api.refreshNodes() : await api.listNodes();
         if (seq !== _tabSwitchSeq || appState.mode !== "admin") return false;
         appState.nodes = res.nodes || [];
         appState.nodesLoaded = true;
