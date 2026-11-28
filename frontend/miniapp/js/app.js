@@ -646,6 +646,9 @@ async function _reloadNodesAndRender({ skipRender = false, removeNodeId = null, 
             const probeMeta = res.probe && typeof res.probe === "object" ? res.probe : null;
             appState.nodesLastProbeSummary = probeMeta;
             appState.nodesLastProbeAt = (probeMeta && probeMeta.probed_at) || new Date().toISOString();
+        } else {
+            appState.nodesLastProbeSummary = null;
+            appState.nodesLastProbeAt = null;
         }
         if (seq !== _tabSwitchSeq || appState.mode !== "admin") return false;
     } catch (err) {
